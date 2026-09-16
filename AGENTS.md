@@ -96,6 +96,7 @@ Do not invent formatter, package-manager, migration, or test commands before the
 - Break lines when it improves structure or comprehension, not because a fixed width has been exceeded.
 - Do not enable line-length lint failures or introduce a formatter that forces aggressive wrapping without explicit approval.
 - Preserve the existing formatting of surrounding code unless changing it is part of the approved stage.
+- NumPy-style docstrings are a must for classes and their methods. Line comments should also be included to explain decisions and designs that are not otherwise inferrable from the code itself.
 
 ## Component Guidance
 
