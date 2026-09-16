@@ -1,6 +1,6 @@
 # ADR 0003: Use Git LFS with an S3-compatible Data Plane
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-16
 
 ## Context
@@ -11,7 +11,7 @@ Datasets may contain files too large for ordinary Git blob storage. The project 
 
 Use standard Git LFS pointer objects and protocol for generally all binary files. Store LFS object bytes in S3-compatible object storage controlled by Niyān. The server implements or fronts the authenticated Git LFS endpoints and maps authorized batch operations to the configured object store.
 
-The public model is an LFS object identifier and size, not an S3 bucket name or key. Bucket topology and key layout remain internal deployment details.
+The public model is an LFS object identifier and size, not an S3 bucket name or key. Bucket topology and key layout remain internal deployment details. The initial topology is defined by [ADR 0007](0007-shared-s3-bucket.md).
 
 ## Consequences
 

@@ -143,18 +143,17 @@ The exact transaction boundary between LFS verification, Git receive, and index 
 
 ## Deployment Boundary
 
-The initial development and self-hosting path is Docker Compose. The stack will include the application services, PostgreSQL, and a local S3-compatible service for development. Production deployments may instead use externally managed PostgreSQL and S3-compatible storage.
+Docker Compose remains the intended easy self-hosting path, but it is not a prerequisite for initial development. The server must accept externally managed PostgreSQL and S3-compatible services through environment configuration. Initial development may use remote infrastructure and does not require local PostgreSQL or S3 containers.
 
-A background worker and Redis may be introduced for indexing, cleanup, or other asynchronous jobs only after those workloads are specified. They are not architectural requirements merely because they are common Django infrastructure.
+A background worker and Redis may be introduced for indexing, cleanup, or other asynchronous jobs only after those workloads are specified. They are not architectural requirements merely because they are common Django infrastructure. Docker Compose should not include them until a concrete workload requires them.
 
 Administrators are responsible for coordinated backups of Git repositories, PostgreSQL, and object storage. Niyān should document consistency requirements and eventually support portable dataset export, but it is not a general backup system.
 
 ## Open Questions
 
-- Which Git server implementation or library should the Django control plane orchestrate?
 - What is the exact Git LFS upload verification and failed-push cleanup protocol?
 - How are Git repositories stored and backed up independently of LFS objects?
-- Should one installation use a shared bucket with dataset prefixes, one bucket per dataset, or a configurable internal strategy?
+- How should an externally hosted PostgreSQL service be deployed, secured, backed up, and upgraded for development and self-hosted installations?
 - What retention, legal purge, garbage-collection, and history-rewrite policies are supported?
 - Which roles and token scopes form the smallest coherent authorization model?
 - What is the viewer plugin API, trust model, and isolation boundary?

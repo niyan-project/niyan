@@ -1,6 +1,6 @@
 # ADR 0002: Model Datasets as Git Repositories
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-16
 
 ## Context

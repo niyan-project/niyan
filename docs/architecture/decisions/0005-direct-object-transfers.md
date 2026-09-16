@@ -1,6 +1,6 @@
 # ADR 0005: Transfer Large Objects Directly Rather Than Through Django
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-16
 
 ## Context

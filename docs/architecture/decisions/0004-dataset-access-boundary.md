@@ -1,6 +1,6 @@
 # ADR 0004: Use the Dataset as the Read-authorization Boundary
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-16
 
 ## Context
