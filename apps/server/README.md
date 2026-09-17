@@ -12,6 +12,8 @@ The server reads runtime configuration from environment variables. For local dev
 
 The object-store adapter exposes metadata, signing, multipart-control, and deletion operations only. Upload and download bodies travel directly between clients and object storage and are never accepted or proxied by Django.
 
+The private bucket's CORS policy must allow the deployed web application's origins to perform the signed methods it uses. V1 transfer actions may require `GET`, `HEAD`, and `PUT`, the `Content-Length` and `x-amz-checksum-*` request headers, and access to provider `ETag` and checksum response headers. Command-line and server-to-server clients do not rely on browser CORS enforcement. Keep allowed origins deployment-specific rather than enabling provider public sharing.
+
 ## System dependencies
 
 The server requires a Git installation that includes `git-http-backend`. Git initializes bare dataset repositories, serves smart-HTTP clone and fetch operations, and supplies authoritative repository metadata for the browsing API.
