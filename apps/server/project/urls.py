@@ -18,11 +18,13 @@ from django.contrib import admin
 from django.urls import path
 
 from datasets.git_http import git_http_backend
+from datasets.lfs_http import lfs_batch
 from project.api import api
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', api.urls),
+    path('git/<uuid:dataset_id>.git/info/lfs/objects/batch', lfs_batch, name='git-lfs-batch'),
     path('git/<uuid:dataset_id>.git', git_http_backend, name='git-dataset-root'),
     path('git/<uuid:dataset_id>.git/<path:git_path>', git_http_backend, name='git-dataset'),
 ]
