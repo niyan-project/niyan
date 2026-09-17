@@ -1,12 +1,8 @@
 # Niyān CLI
 
-- **Status:** Draft
+- **Status:** Accepted
 - **Audience:** CLI, server, and release maintainers
 - **Last reviewed:** 2026-09-17
-
-## Draft Boundary
-
-The command hierarchy and behavior already approved in this document guide incremental CLI implementation. The specification remains draft because [Issue #4](https://github.com/aryan-f/Niyan/issues/4) has not yet settled automatic Git LFS tracking, thresholds, `.gitattributes` authority, and explicit storage-mode overrides. Sections affected by that decision must not be treated as an accepted tracking contract until the issue is closed and this status is reviewed again.
 
 ## Purpose
 
@@ -205,7 +201,7 @@ niyan log [--limit <count>]
 
 These commands first validate the checkout's stored immutable dataset identity against its configured remote, then delegate to Git. `status` uses Git's stable porcelain-v2 interface to distinguish staged changes, unstaged changes, additions, deletions, renames, untracked files, and conflicts. It reports whether history is shallow and classifies indexed LFS paths as materialized, missing, locally cached pointer content, or unavailable pointer content without contacting the server or requiring Git LFS. Ordinary files are never parsed as dataset formats.
 
-`add` stages additions, changes, renames, and deletions while applying the accepted LFS tracking policy. Explicit `--lfs` and `--git` overrides may be provided, but the CLI must not silently rewrite existing history or migrate an already tracked file between storage modes merely because its size changed.
+`add` stages additions, changes, renames, and deletions while applying the accepted [CLI Git LFS tracking policy](cli-lfs-tracking.md). By default, a new regular file uses Git LFS when Git's binary heuristic finds a NUL in its first 8,000 bytes or its size is greater than 10 MiB. Niyān persists the decision through normal `git lfs track --filename` behavior and then delegates staging and filtering to stock Git and Git LFS. Explicit `--lfs` and `--git` overrides persist standard Git attribute rules. The CLI must not silently rewrite existing history or migrate an already tracked file merely because its size or sniffed content changes.
 
 `restore` requires one or more explicit paths and affects only those paths. Without `--staged`, it restores working-tree content from the index. With `--staged`, it removes the selected changes from the index while preserving their working-tree content. It does not expose Git's destructive source-selection options in v1.
 

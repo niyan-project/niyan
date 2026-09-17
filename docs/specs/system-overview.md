@@ -68,7 +68,7 @@ Git objects are immutable, but refs are mutable pointers. The accepted [Git writ
 
 ### Large-object Data Plane
 
-Files selected for Git LFS are represented in Git by standard LFS pointer blobs. Their bytes are stored in S3-compatible object storage under a layout controlled by Niyān.
+Files selected by committed Git attributes or the accepted [CLI Git LFS tracking policy](cli-lfs-tracking.md) are represented in Git by standard LFS pointer blobs. By default, a new regular file uses LFS when it is binary according to Git's NUL-byte heuristic or larger than 10 MiB; existing paths preserve their storage mode. LFS object bytes are stored in S3-compatible object storage under a layout controlled by Niyān.
 
 For large-object upload or download, an authorized Git LFS batch request returns short-lived object-specific transfer actions. The client transfers bytes directly to or from object storage. Niyān requires successful upload finalization before a newly uploaded object is considered available to repository operations.
 
@@ -157,7 +157,6 @@ Administrators are responsible for coordinated backups of Git repositories, Post
 
 The accepted overview does not imply that every component contract is finished. These genuinely unresolved v1 decisions have explicit tracker ownership:
 
-- [Issue #4](https://github.com/aryan-f/Niyan/issues/4) defines automatic Git LFS tracking, thresholds, attributes, and explicit overrides in the CLI.
 - [Issue #34](https://github.com/aryan-f/Niyan/issues/34) defines configurable protected-ref rules beyond the accepted fast-forward-only baseline.
 - [Issue #36](https://github.com/aryan-f/Niyan/issues/36) defines browser upload staging and explicit commit creation.
 - [Issue #26](https://github.com/aryan-f/Niyan/issues/26) finalizes Python filesystem addressing, authentication, capability negotiation, and sync-versus-async scope.
