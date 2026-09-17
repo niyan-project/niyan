@@ -70,9 +70,9 @@ Git objects are immutable, but refs are mutable pointers. Force-push, deletion, 
 
 Files selected for Git LFS are represented in Git by standard LFS pointer blobs. Their bytes are stored in S3-compatible object storage under a layout controlled by Niyān.
 
-For large-object upload or download, an authorized Git LFS batch request returns short-lived object-specific transfer actions. The client transfers bytes directly to or from object storage. Niyān may require a verification call before an uploaded object is considered available to repository operations.
+For large-object upload or download, an authorized Git LFS batch request returns short-lived object-specific transfer actions. The client transfers bytes directly to or from object storage. Niyān requires successful upload finalization before a newly uploaded object is considered available to repository operations.
 
-The physical bucket topology, orphan grace period, garbage-collection algorithm, and retention rules are intentionally unresolved. They must not leak into the public dataset model.
+The accepted [Git LFS and object-storage protocol](git-lfs-and-object-storage.md) defines batch negotiation, direct and multipart transfers, upload finalization, a seven-day failed-push grace period, and automatic orphan cleanup. One private installation bucket uses dataset UUID-scoped keys as defined by [ADR 0007](../architecture/decisions/0007-shared-s3-bucket.md). Physical keys and provider checksum capabilities remain internal deployment details and must not leak into the public dataset model.
 
 ### Web Application
 
@@ -149,16 +149,15 @@ The exact transaction boundary between LFS verification, Git receive, and index 
 
 Docker Compose remains the intended easy self-hosting path, but it is not a prerequisite for initial development. The server must accept externally managed PostgreSQL and S3-compatible services through environment configuration. Initial development may use remote infrastructure and does not require local PostgreSQL or S3 containers.
 
-A background worker and Redis may be introduced for indexing, cleanup, or other asynchronous jobs only after those workloads are specified. They are not architectural requirements merely because they are common Django infrastructure. Docker Compose should not include them until a concrete workload requires them.
+A bundled maintenance worker performs failed-upload and incomplete-multipart cleanup defined by the [Git LFS and object-storage protocol](git-lfs-and-object-storage.md). It uses PostgreSQL-backed state and does not require Redis or Celery in v1. Docker Compose and production deployment guidance run the worker by default. Other asynchronous infrastructure may be introduced only after a concrete workload requires it.
 
 Administrators are responsible for coordinated backups of Git repositories, PostgreSQL, and object storage. Niyān should document consistency requirements and eventually support portable dataset export, but it is not a general backup system.
 
 ## Open Questions
 
-- What is the exact Git LFS upload verification and failed-push cleanup protocol?
 - How are Git repositories stored and backed up independently of LFS objects?
 - How should an externally hosted PostgreSQL service be deployed, secured, backed up, and upgraded for development and self-hosted installations?
-- What retention, legal purge, garbage-collection, and history-rewrite policies are supported?
+- What retention, legal purge, and full reachability garbage-collection policies apply after ref deletion or history rewriting?
 - Which roles and token scopes form the smallest coherent authorization model?
 - What is the viewer plugin API, trust model, and isolation boundary?
 - What local cache and partial-fetch behavior should the CLI expose beyond the accepted command surface?
