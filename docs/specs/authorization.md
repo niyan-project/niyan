@@ -27,13 +27,16 @@ The initial ordered roles are `reader`, `contributor`, `maintainer`, and `owner`
 | --- | --- | --- | --- | --- |
 | View dataset metadata and browse repository | yes | yes | yes | yes |
 | Clone, fetch, and download repository content | yes | yes | yes | yes |
-| Push ordinary ref updates | no | yes | yes | yes |
+| Create and fast-forward branches or create tags | no | yes | yes | yes |
+| Delete a non-default branch | no | yes | yes | yes |
+| Delete a tag | no | no | yes | yes |
+| Manage configurable protected-ref rules | no | no | yes | yes |
 | Change dataset name or slug | no | no | yes | yes |
 | Create datasets in a group namespace | no | no | yes | yes |
 | Manage dataset grants | no | no | no | yes |
 | Permanently delete a dataset | no | no | no | yes |
 
-Protected-ref mutation is intentionally omitted until the write-transport specification defines it.
+No role may force-update a branch, update an existing tag in place, or delete the default branch in v1. The accepted [Git write transport and ref-update policy](git-write-transport.md) defines these baseline rules. Later configurable protection may make a selected ref stricter but must not silently weaken that baseline.
 
 The owner of a personal namespace has the `owner` role for its datasets. For a group-owned dataset, the highest membership role inherited from the containing namespace or any ancestor group applies.
 

@@ -64,7 +64,7 @@ It is not authoritative for Git history. A database index of commits, refs, path
 
 Git is authoritative for directory trees, history, branching, tagging, diffs, and merges. The server exposes authenticated Git fetch and push endpoints and applies access and protected-ref policy around those operations.
 
-Git objects are immutable, but refs are mutable pointers. Force-push, deletion, retention, and repository garbage-collection policy require explicit specification before the product can claim stronger history immutability than Git itself provides.
+Git objects are immutable, but refs are mutable pointers. The accepted [Git write transport and ref-update policy](git-write-transport.md) permits contributor fast-forward pushes, protects the default branch from deletion, prevents in-place tag updates, and rejects every force update in v1. Retention and repository garbage collection remain separate policy concerns.
 
 ### Large-object Data Plane
 
@@ -106,7 +106,7 @@ An installation initially represents one organization while allowing nested grou
 
 The confidentiality boundary is the dataset. A principal who can read a dataset can read its reachable Git and LFS objects and history. Branch rules may restrict creation, update, force-push, or deletion of refs, but must not be advertised as secure read isolation between branches because Git object negotiation does not provide that boundary.
 
-Initial role names and exact permissions are not yet accepted. The model should distinguish at least reading, contributing, maintaining protected refs and settings, and owning a namespace or dataset. Browser login and scoped access tokens are required authentication modes; service identities and institutional single sign-on remain to be specified.
+The initial ordered roles are reader, contributor, maintainer, and owner. The [authorization specification](authorization.md) defines their dataset capabilities, while the [Git write transport policy](git-write-transport.md) defines the baseline ref operations available to contributors and maintainers. Browser login and scoped access tokens are required authentication modes; service identities and institutional single sign-on remain to be specified.
 
 ## Core Workflows
 
@@ -117,10 +117,10 @@ Initial role names and exact permissions are not yet accepted. The model should 
 3. The `niyan` CLI adds files and creates dataset commits while delegating repository and large-file mechanics to Git and Git LFS.
 4. Under CLI orchestration, Git LFS uploads missing objects directly to S3-compatible storage using authorized transfer actions.
 5. The CLI invokes Git to push the commit and proposed ref update.
-6. The server authenticates the actor, enforces dataset and protected-ref policy, and ensures required LFS objects are available before accepting the update.
+6. The server authenticates the actor and applies the [Git write transport and ref-update policy](git-write-transport.md), including required LFS-object availability, before accepting the update.
 7. Rebuildable indexes and the web view catch up to the accepted Git state.
 
-The exact transaction boundary between LFS verification, Git receive, and index updates needs a dedicated protocol specification.
+The [Git LFS protocol](git-lfs-and-object-storage.md) and [Git write transport policy](git-write-transport.md) define the transaction boundary: uploads become available before receive-pack, pre-receive validates and leases required objects before ref visibility, and recoverable post-receive work marks references and schedules indexing.
 
 ### Consume a Dataset from a Project
 

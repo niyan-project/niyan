@@ -18,6 +18,7 @@ Architecture decision records use corresponding `Proposed`, `Accepted`, `Depreca
 - [Authentication](authentication.md) — browser sessions, CLI login, access tokens, scopes, and credential handling.
 - [Authorization](authorization.md) — namespace roles, dataset grants, permission inheritance, and the shared policy boundary.
 - [Repository access](repository-access.md) — read-only Git-over-HTTPS transport and repository browsing APIs.
+- [Git write transport and ref-update policy](git-write-transport.md) — authenticated receive-pack, initial branch and tag rules, concurrency, hooks, and LFS publication checks.
 - [Git LFS and object-storage protocol](git-lfs-and-object-storage.md) — large-object identity, direct and multipart transfers, verification, retries, and failed-push cleanup.
 - [CLI](cli.md) — the command surface and behavior of the `niyan` console entry point.
 - [Namespaces and datasets](namespaces-and-datasets.md) — stable identity, human-facing paths, and dataset repository creation.

@@ -17,7 +17,7 @@ The server accepts only:
 - `GET /git/<dataset-uuid>.git/info/refs?service=git-upload-pack`; and
 - `POST /git/<dataset-uuid>.git/git-upload-pack`.
 
-Receive-pack, dumb HTTP, archive endpoints, and SSH are not supported in this slice.
+Receive-pack, dumb HTTP, archive endpoints, and SSH are not supported in this read-only slice. Authenticated receive-pack is defined separately by the [Git write transport and ref-update policy](git-write-transport.md).
 
 Git authenticates with HTTPS Basic authentication. The username is informational and the access token is the password. The token must grant `read_repository`, its resource boundary must include the dataset, and the owning user must currently have reader access. Invalid credentials return an authentication challenge; unknown and inaccessible datasets are not distinguished.
 
@@ -54,8 +54,7 @@ This slice reads repositories directly. It does not store refs, commits, paths, 
 
 ## Initial Non-goals
 
-- Push and ref mutation.
-- Protected branches and tags.
+- Push, ref mutation, and the initial protected-ref baseline, which are defined by the [Git write transport and ref-update policy](git-write-transport.md).
 - Git LFS object transfer.
 - Server-side diffs or semantic file comparison.
 - Full-text search.

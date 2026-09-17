@@ -77,7 +77,7 @@ When a backend supports a provider-validated SHA-256 checksum, Niyān should bin
 
 S3-compatible services vary in their checksum extensions. V1 therefore does not require one optional provider checksum algorithm and does not download every new object through Django solely to calculate a second hash. The server must record which integrity evidence was actually validated and must not claim cryptographic server-side content verification when it performed only key, size, and provider transfer checks. Git LFS clients still validate complete downloads against the SHA-256 pointer identifier.
 
-An object becomes `available` only after successful finalization. A Git ref update must not become visible when it introduces a pointer to an object that is not available for that dataset. The write-transport specification defines how receive-pack discovers and enforces that set atomically with a ref update.
+An object becomes `available` only after successful finalization. A Git ref update must not become visible when it introduces a pointer to an object that is not available for that dataset. The [Git write transport and ref-update policy](git-write-transport.md) defines how receive-pack discovers, leases, and enforces that set before ref visibility.
 
 ## Object Lifecycle and Failed Pushes
 
