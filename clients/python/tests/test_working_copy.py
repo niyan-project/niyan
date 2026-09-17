@@ -7,7 +7,7 @@ from pathlib import Path
 from niyan.cli import build_parser
 from niyan.config import CheckoutIdentity, Configuration, find_local_config
 from niyan.errors import GitError
-from niyan.working_copy import parse_porcelain_v2, show_diff, show_log, show_status
+from niyan.working_copy import commit_changes, parse_porcelain_v2, restore_paths, show_diff, show_log, show_status
 
 
 DATASET_ID = '22222222-2222-2222-2222-222222222222'
@@ -99,6 +99,47 @@ class WorkingCopyTests(unittest.TestCase):
         self.assertIn('-# Images', staged)
         self.assertIn('+# Updated images', staged)
 
+    def test_restore_preserves_the_staged_and_working_tree_distinction(self):
+        """Restore content or unstage it according to the explicit mode."""
+
+        (self.repository / 'README.md').write_text('# Unstaged revision\n')
+        restore_paths(['README.md'], cwd=self.repository)
+        self.assertEqual((self.repository / 'README.md').read_text(), '# Images\n')
+
+        (self.repository / 'README.md').write_text('# Staged revision\n')
+        self._git('add', 'README.md')
+        restore_paths(['README.md'], staged=True, cwd=self.repository)
+        self.assertEqual((self.repository / 'README.md').read_text(), '# Staged revision\n')
+        self.assertEqual(self._git('diff', '--cached', '--name-only').stdout, b'')
+        self.assertEqual(self._git('diff', '--name-only').stdout.strip(), b'README.md')
+
+    def test_commit_creates_a_local_commit_and_rejects_an_empty_index(self):
+        """Commit staged changes without synchronizing the remote."""
+
+        (self.repository / 'README.md').write_text('# Committed revision\n')
+        self._git('add', 'README.md')
+        with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+            commit_changes(message='Update dataset', cwd=self.repository, stdout=output, stderr=errors)
+
+        self.assertEqual(self._git('log', '-1', '--pretty=%s').stdout.strip(), b'Update dataset')
+        self.assertEqual(self._git('rev-list', '--count', 'HEAD').stdout.strip(), b'2')
+        with self.assertRaisesRegex(GitError, 'no staged dataset changes'):
+            commit_changes(message='Empty commit', cwd=self.repository)
+
+    def test_commit_supports_the_first_commit_in_an_unborn_checkout(self):
+        """Compare a staged initial tree against Git's implicit empty tree."""
+
+        empty_repository = self.root / 'initial'
+        self._initialize_checkout(empty_repository)
+        (empty_repository / 'README.md').write_text('# Initial data\n')
+        subprocess.run(['git', '-C', str(empty_repository), 'add', 'README.md'], check=True)
+
+        with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+            commit_changes(message='Initial dataset', cwd=empty_repository, stdout=output, stderr=errors)
+
+        subject = subprocess.run(['git', '-C', str(empty_repository), 'log', '-1', '--pretty=%s'], check=True, capture_output=True).stdout.strip()
+        self.assertEqual(subject, b'Initial dataset')
+
     def test_log_is_bounded_and_handles_an_unborn_repository(self):
         """Limit history output and describe a checkout with no commits."""
 
@@ -170,6 +211,16 @@ class WorkingCopyTests(unittest.TestCase):
         self.assertEqual(arguments.limit, 5)
         with self.assertRaises(SystemExit):
             build_parser().parse_args(['log', '--limit', '0'])
+
+    def test_cli_exposes_restore_and_commit_arguments(self):
+        """Keep local write operations available through the public parser."""
+
+        restore_arguments = build_parser().parse_args(['restore', '--staged', 'README.md', 'data/file.bin'])
+        commit_arguments = build_parser().parse_args(['commit', '--message', 'Record data'])
+
+        self.assertTrue(restore_arguments.staged)
+        self.assertEqual(restore_arguments.paths, ['README.md', 'data/file.bin'])
+        self.assertEqual(commit_arguments.message, 'Record data')
 
     def _initialize_checkout(self, path):
         """Initialize a Git tree with matching checkout-private identity."""

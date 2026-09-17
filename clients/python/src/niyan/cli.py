@@ -10,7 +10,7 @@ from niyan.credentials import CredentialStores
 from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
 from niyan.errors import ApiError, ConfigurationError, CredentialError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper
-from niyan.working_copy import show_diff, show_log, show_status
+from niyan.working_copy import commit_changes, restore_paths, show_diff, show_log, show_status
 
 
 def build_parser():
@@ -73,6 +73,11 @@ def build_parser():
     delete_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
 
     commands.add_parser('status', help='Show dataset working-copy and LFS state.')
+    restore_parser = commands.add_parser('restore', help='Restore dataset paths from the index or unstage them.')
+    restore_parser.add_argument('paths', nargs='+', help='One or more paths to restore.')
+    restore_parser.add_argument('--staged', action='store_true', help='Unstage paths while preserving their working-tree content.')
+    commit_parser = commands.add_parser('commit', help='Create a local dataset commit from staged changes.')
+    commit_parser.add_argument('-m', '--message', help='Commit message. Git opens its configured editor when omitted.')
     diff_parser = commands.add_parser('diff', help='Show unstaged or staged dataset changes.')
     diff_parser.add_argument('--staged', action='store_true', help='Compare the index to HEAD instead of the working tree to the index.')
     log_parser = commands.add_parser('log', help='Show bounded dataset commit history.')
@@ -220,6 +225,12 @@ def main(argv=None):
             return 0
         if arguments.command == 'status':
             show_status(cwd=Path.cwd())
+            return 0
+        if arguments.command == 'restore':
+            restore_paths(arguments.paths, staged=arguments.staged, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'commit':
+            commit_changes(message=arguments.message, cwd=Path.cwd())
             return 0
         if arguments.command == 'diff':
             show_diff(staged=arguments.staged, cwd=Path.cwd())

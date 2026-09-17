@@ -71,6 +71,34 @@ def show_diff(*, staged=False, cwd=None, stdout=None):
     _run_git(working_directory, arguments, operation='render the dataset diff', capture_output=False, stdout=stdout)
 
 
+def restore_paths(paths, *, staged=False, cwd=None):
+    """Restore working-tree paths or remove them from the index."""
+
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    if not paths:
+        raise GitError('At least one path is required to restore dataset content.')
+    arguments = ['restore']
+    if staged:
+        arguments.append('--staged')
+    arguments.extend(['--', *paths])
+    _run_git(working_directory, arguments, operation='restore the requested dataset paths')
+
+
+def commit_changes(*, message=None, cwd=None, stdout=None, stderr=None):
+    """Create one local Git commit from the staged dataset changes."""
+
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    staged_result = _run_git(working_directory, ['diff', '--cached', '--quiet', '--exit-code'], operation='inspect staged dataset changes', accepted_statuses={0, 1})
+    if staged_result.returncode == 0:
+        raise GitError('There are no staged dataset changes to commit.')
+    arguments = ['commit']
+    if message is not None:
+        arguments.extend(['--message', message])
+    _run_git(working_directory, arguments, operation='create the dataset commit', capture_output=False, stdout=stdout, stderr=stderr)
+
+
 def show_log(*, limit=20, cwd=None, stdout=None):
     """Show bounded commit history and indicate shallow repositories."""
 
@@ -247,7 +275,7 @@ def _parse_lfs_pointer(content):
     return object_id_match.group(1).decode('ascii')
 
 
-def _run_git(cwd, arguments, *, operation, accepted_statuses=frozenset({0}), capture_output=True, stdout=None):
+def _run_git(cwd, arguments, *, operation, accepted_statuses=frozenset({0}), capture_output=True, stdout=None, stderr=None):
     """Run one bounded Git command without a shell and sanitize failures."""
 
     if shutil.which('git') is None:
@@ -257,7 +285,7 @@ def _run_git(cwd, arguments, *, operation, accepted_statuses=frozenset({0}), cap
         if capture_output:
             result = subprocess.run(command, check=False, capture_output=True, timeout=60)
         else:
-            result = subprocess.run(command, check=False, stdout=stdout, stderr=subprocess.PIPE)
+            result = subprocess.run(command, check=False, stdout=stdout, stderr=stderr)
     except (OSError, subprocess.SubprocessError) as error:
         raise GitError(f'Git could not {operation}.') from error
     if result.returncode not in accepted_statuses:

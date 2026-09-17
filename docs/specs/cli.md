@@ -203,7 +203,9 @@ These commands first validate the checkout's stored immutable dataset identity a
 
 `add` stages additions, changes, renames, and deletions while applying the accepted LFS tracking policy. Explicit `--lfs` and `--git` overrides may be provided, but the CLI must not silently rewrite existing history or migrate an already tracked file between storage modes merely because its size changed.
 
-`restore` affects only the requested paths and must preserve Git's staged-versus-working-tree distinction. `commit` creates an ordinary Git commit and never pushes implicitly. `diff` streams Git's structural or textual diff and does not promise semantic comparison of dataset formats; `--staged` compares the index to `HEAD`. `log` shows at most 20 commits by default, accepts a positive `--limit`, handles an unborn repository, and reports when the visible history is shallow. Machine-readable output is a later extension rather than part of this initial surface.
+`restore` requires one or more explicit paths and affects only those paths. Without `--staged`, it restores working-tree content from the index. With `--staged`, it removes the selected changes from the index while preserving their working-tree content. It does not expose Git's destructive source-selection options in v1.
+
+`commit` creates an ordinary local Git commit from staged changes and never pushes implicitly. `-m` or `--message` supplies its message; when omitted, Git opens the user's configured editor. Niyān reports an empty index before starting the commit flow, while Git remains responsible for hooks, identity configuration, signing configuration, and commit construction. `diff` streams Git's structural or textual diff and does not promise semantic comparison of dataset formats; `--staged` compares the index to `HEAD`. `log` shows at most 20 commits by default, accepts a positive `--limit`, handles an unborn repository, and reports when the visible history is shallow. Machine-readable output is a later extension rather than part of this initial surface.
 
 ## Branches, Tags, and Merging
 
