@@ -196,12 +196,14 @@ niyan restore <paths>...
 niyan restore --staged <paths>...
 niyan commit [-m <message>]
 niyan diff [--staged]
-niyan log
+niyan log [--limit <count>]
 ```
 
-These commands delegate to Git while presenting dataset-oriented diagnostics. `status` distinguishes ordinary Git blobs, LFS pointers, unavailable LFS content, staged changes, unstaged changes, untracked files, and conflicts. `add` stages additions, changes, renames, and deletions while applying the accepted LFS tracking policy. Explicit `--lfs` and `--git` overrides may be provided, but the CLI must not silently rewrite existing history or migrate an already tracked file between storage modes merely because its size changed.
+These commands first validate the checkout's stored immutable dataset identity against its configured remote, then delegate to Git. `status` uses Git's stable porcelain-v2 interface to distinguish staged changes, unstaged changes, additions, deletions, renames, untracked files, and conflicts. It reports whether history is shallow and classifies indexed LFS paths as materialized, missing, locally cached pointer content, or unavailable pointer content without contacting the server or requiring Git LFS. Ordinary files are never parsed as dataset formats.
 
-`restore` affects only the requested paths and must preserve Git's staged-versus-working-tree distinction. `commit` creates an ordinary Git commit and never pushes implicitly. `diff` is a Git structural or textual diff and does not promise semantic comparison of dataset formats. `log` shows standard commit history and supports bounded machine-readable output.
+`add` stages additions, changes, renames, and deletions while applying the accepted LFS tracking policy. Explicit `--lfs` and `--git` overrides may be provided, but the CLI must not silently rewrite existing history or migrate an already tracked file between storage modes merely because its size changed.
+
+`restore` affects only the requested paths and must preserve Git's staged-versus-working-tree distinction. `commit` creates an ordinary Git commit and never pushes implicitly. `diff` streams Git's structural or textual diff and does not promise semantic comparison of dataset formats; `--staged` compares the index to `HEAD`. `log` shows at most 20 commits by default, accepts a positive `--limit`, handles an unborn repository, and reports when the visible history is shallow. Machine-readable output is a later extension rather than part of this initial surface.
 
 ## Branches, Tags, and Merging
 

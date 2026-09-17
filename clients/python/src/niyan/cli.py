@@ -10,6 +10,7 @@ from niyan.credentials import CredentialStores
 from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
 from niyan.errors import ApiError, ConfigurationError, CredentialError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper
+from niyan.working_copy import show_diff, show_log, show_status
 
 
 def build_parser():
@@ -70,6 +71,12 @@ def build_parser():
     delete_parser.add_argument('dataset_path', nargs='?', help='Dataset path in namespace/dataset form. Prompts when omitted in a terminal.')
     delete_parser.add_argument('--confirm', help='Exact dataset path required for non-interactive deletion.')
     delete_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+
+    commands.add_parser('status', help='Show dataset working-copy and LFS state.')
+    diff_parser = commands.add_parser('diff', help='Show unstaged or staged dataset changes.')
+    diff_parser.add_argument('--staged', action='store_true', help='Compare the index to HEAD instead of the working tree to the index.')
+    log_parser = commands.add_parser('log', help='Show bounded dataset commit history.')
+    log_parser.add_argument('--limit', type=_positive_integer, default=20, help='Maximum commits to show. Defaults to 20.')
 
     return parser
 
@@ -211,6 +218,15 @@ def main(argv=None):
             host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
             delete_remote_dataset(host=host, dataset_path=arguments.dataset_path, confirmation=arguments.confirm, paths=paths, stores=stores, cwd=Path.cwd())
             return 0
+        if arguments.command == 'status':
+            show_status(cwd=Path.cwd())
+            return 0
+        if arguments.command == 'diff':
+            show_diff(staged=arguments.staged, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'log':
+            show_log(limit=arguments.limit, cwd=Path.cwd())
+            return 0
         parser.error('Unsupported command.')
     except NiyanCliError as error:
         print(f'error: {error}', file=sys.stderr)
@@ -267,6 +283,15 @@ def _error_exit_status(error):
     if isinstance(error, ConfigurationError):
         return 2
     return 1
+
+
+def _positive_integer(value):
+    """Parse one strictly positive command-line integer."""
+
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError('value must be a positive integer')
+    return parsed
 
 
 if __name__ == '__main__':
