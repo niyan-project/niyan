@@ -6,7 +6,7 @@
 
 ## Purpose
 
-The Niyān Python client gives Python programs read-only access to versioned dataset files through the standard `fsspec` ecosystem. It is a proper PyPI package, not a Python wrapper around the `niyan` CLI.
+The Niyān Python client gives Python programs read-only access to versioned dataset files through the standard `fsspec` ecosystem. It is an importable part of the unified `niyan` PyPI distribution, which also provides the `niyan` console entry point. The filesystem client is not a wrapper around the CLI.
 
 Its primary users are researchers working with files too large to clone or copy casually, including users who run analysis on shared clusters and HPC systems. They must be able either to stream only the byte ranges their libraries need or to download complete files onto high-throughput local or scratch storage.
 
@@ -24,7 +24,7 @@ The package must:
 - keep every recursive operation pinned to one resolved commit;
 - refresh expired signed transfer authorization transparently when safe to retry;
 - avoid holding an entire large object in memory or requiring equivalent temporary disk space for streaming reads;
-- work without Git, Git LFS, the Niyān CLI, or a local repository checkout; and
+- work without Git, Git LFS, invoking the Niyān CLI, or a local repository checkout; and
 - interoperate through normal `fsspec` entry points so downstream libraries do not need Niyān-specific integrations.
 
 The package should have a small dependency footprint and support headless, non-interactive execution suitable for schedulers and compute nodes.
@@ -77,7 +77,7 @@ Resume behavior, overwrite policy, local permissions, preservation of modificati
 
 ## Authentication
 
-Headless token authentication is required for v1 because cluster and scheduled jobs may have no browser. The package must also be able to reuse a supported user credential established on a login node without copying secrets into dataset URLs or source code.
+Headless token authentication is required for v1 because cluster and scheduled jobs may have no browser. The filesystem client must accept an explicit token and may use the package's shared credential-discovery facilities to reuse a supported user credential established through `niyan auth login` on a login node. It must never invoke a CLI command to do so or copy secrets into dataset URLs or source code.
 
 Credential discovery order, configuration-file location, environment-variable names, browser-assisted login integration, and secure storage behavior remain to be specified. Error messages must distinguish authentication failure, denied dataset access, missing paths, expired transfer authorization, and unavailable object storage.
 
@@ -85,7 +85,9 @@ Credential discovery order, configuration-file location, environment-variable na
 
 The client and server need an explicit compatibility contract for REST API versions and filesystem capabilities. Unsupported server features must fail clearly rather than silently changing read semantics.
 
-The package is versioned and released independently from the standalone CLI. Its PyPI distribution name, Python version range, optional extras, type-hint policy, sync/async support, and semantic-versioning commitment remain open questions.
+The filesystem client and CLI are versioned and released together as the `niyan` PyPI distribution for Python 3.11 or newer. Installing the distribution provides both the importable library and the `niyan` console entry point. Filesystem imports must not eagerly import CLI-only modules or perform Git, credential-store, configuration, or network discovery.
+
+Optional extras, type-hint policy, sync/async support, and the semantic-versioning commitment remain open questions. The base dependency set must remain suitable for headless HPC environments; CLI-only dependencies and imports must not make ordinary filesystem use depend on an available desktop session or credential-store backend.
 
 ## Non-goals
 
@@ -107,4 +109,4 @@ Before v1 is considered complete, automated tests should demonstrate that:
 5. A signed URL that expires during a safe read can be refreshed without restarting the logical operation from byte zero.
 6. A failed full download never appears at the requested final path as if it were complete.
 7. A full LFS download detects an object whose bytes do not match its expected identifier.
-8. The package operates in a clean Python environment with no Git, Git LFS, or `niyan` executable installed.
+8. The filesystem client operates in a clean Python environment with no Git or Git LFS installed and never invokes the `niyan` console entry point.

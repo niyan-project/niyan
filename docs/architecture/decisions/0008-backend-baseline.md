@@ -13,6 +13,8 @@ Use Python 3.13 for the initial backend environment and Django 5.2 LTS for the c
 
 This decision applies to the Django server. The independently published Python filesystem client may support a broader Python version range once its packaging requirements are specified.
 
+[ADR 0009](0009-unified-python-client.md) supersedes the characterization of the filesystem client as independently published. The distinction between the server's runtime baseline and the client distribution's runtime baseline remains in force.
+
 ## Consequences
 
 - Contributors and deployment automation share one documented backend runtime baseline.

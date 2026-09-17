@@ -15,10 +15,10 @@ The first release optimizes for a coherent, dependable dataset workflow rather t
 - Represent each dataset as a hierarchical tree of files with immutable, reproducible versions.
 - Let users browse a dataset's files, README, commits, branches, and tags in a web application.
 - Let ordinary Git repositories pin exact dataset versions, including through Git submodules.
-- Provide a standalone `niyan` CLI as the supported interface for dataset repository workflows while delegating their mechanics to Git and Git LFS internally.
+- Provide a `niyan` CLI as the supported interface for dataset repository workflows while delegating their mechanics to Git and Git LFS internally.
 - Support users, groups, namespaces, dataset access, tokens, and branch protection.
 - Transfer large objects directly to and from S3-compatible storage without routing their bytes through Django.
-- Publish a separate PyPI package that exposes datasets as a read-only `fsspec` filesystem for streaming and downloading files on workstations, clusters, and HPC systems.
+- Publish one `niyan` PyPI package that provides the CLI and exposes datasets as a read-only `fsspec` filesystem for streaming and downloading files on workstations, clusters, and HPC systems.
 - Offer a stable, documented REST API for the web application, CLI, Python client, and other integrations.
 - Allow installable viewers to display special file formats in the browser while the core remains format-agnostic.
 - Be straightforward to self-host with Docker Compose and usable with externally managed PostgreSQL and S3-compatible services.
@@ -82,15 +82,17 @@ Manual browser upload should be possible, even though the CLI is the primary wor
 
 ### CLI
 
-The standalone `niyan` CLI owns the supported dataset repository workflow and coordinates Git, Git LFS, and REST operations internally. Git and Git LFS may be required implementation dependencies for the initial CLI, but users should not need to understand or invoke them directly. The CLI must support exact-version workflows and selective file or directory retrieval where standard Git LFS behavior permits it.
+The `niyan` CLI owns the supported dataset repository workflow and coordinates Git, Git LFS, and REST operations internally. Git and Git LFS may be required implementation dependencies for repository-oriented commands, but users should not need to understand or invoke them directly. The CLI must support exact-version workflows and selective file or directory retrieval where standard Git LFS behavior permits it.
 
 Direct Git operations against a Niyān dataset may remain technically possible because the repository and transport are standard, but they are outside the supported user experience. Niyān documentation, diagnostics, authentication setup, and compatibility guarantees target CLI-mediated operations.
 
-The CLI is distributed independently from the Python package. Its primary installation experience should be a single-command bootstrap installer, with published checksums and a documented manual installation path. The implementation language and packaging format are not yet selected.
+The CLI is the console entry point of the unified `niyan` Python distribution. `pipx install niyan` is the standard isolated PyPI installation. A single-command bootstrap installer, published checksums, and a documented manual installation path provide a polished alternative without asking users to manage a virtual environment themselves.
 
 ### Python Filesystem Client
 
-Niyān publishes a proper Python package on PyPI whose v1 product surface is a read-only, `fsspec`-compatible filesystem. It allows research code and established Python libraries to list dataset paths, open remote files, stream byte ranges, and fully download files without cloning the dataset or installing Git, Git LFS, or the Niyān CLI.
+The same `niyan` distribution exposes a proper Python API whose v1 library surface is a read-only, `fsspec`-compatible filesystem. It allows research code and established Python libraries to list dataset paths, open remote files, stream byte ranges, and fully download files without cloning the dataset, installing Git or Git LFS, or invoking the CLI.
+
+The CLI and filesystem client are separate internal modules with a shared foundation for HTTP, authentication, configuration, models, errors, and transfers. Filesystem use must not initialize or invoke CLI behavior, and importing the package must not trigger Git inspection, credential access, or network activity.
 
 The client resolves a dataset path and requested revision through the public REST API. Before reading data, it resolves branches or tags to an exact Git commit and exposes that resolved commit to callers. A recursive download must use one resolved commit for its entire operation so a moving branch cannot produce a mixed-version directory.
 
@@ -136,7 +138,7 @@ The exact transaction boundary between LFS verification, Git receive, and index 
 
 ### Stream or Download Data from Python
 
-1. A user installs the Python client from PyPI on a workstation, cluster login node, or HPC compute environment.
+1. A user installs `niyan` from PyPI on a workstation, cluster login node, or HPC compute environment.
 2. The client authenticates to the Niyān REST API using a token or other supported headless credential.
 3. The requested dataset revision is resolved to an exact Git commit, and the client lists or resolves paths at that commit.
 4. Opening a large file obtains short-lived transfer authorization and returns an `fsspec`-compatible binary file object.
@@ -159,8 +161,8 @@ Administrators are responsible for coordinated backups of Git repositories, Post
 - What retention, legal purge, garbage-collection, and history-rewrite policies are supported?
 - Which roles and token scopes form the smallest coherent authorization model?
 - What is the viewer plugin API, trust model, and isolation boundary?
-- What are the CLI command surface, local cache behavior, partial-fetch behavior, implementation language, and machine-readable output contract?
-- What package name, filesystem URI grammar, supported Python versions, authentication configuration, cache defaults, and async guarantees should the Python client expose?
+- What local cache and partial-fetch behavior should the CLI expose beyond the accepted command surface?
+- What filesystem URI grammar, authentication configuration, cache defaults, and async guarantees should the Python client expose?
 - Which operations are indexed synchronously, and which may be eventually consistent in the web application?
 - What portable export format preserves complete Git and LFS history across installations?
 - Which open-source license best protects the desired community model?

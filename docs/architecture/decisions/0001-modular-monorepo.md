@@ -13,6 +13,8 @@ Keep the first-party Niyān components in one repository, organized as independe
 
 The web application, CLI, and Python client must consume documented server interfaces rather than import server implementation code. Generated or shared contracts may cross boundaries only through an explicit package or artifact. The CLI and Python client are independently distributed products and must not depend on one another at runtime.
 
+[ADR 0009](0009-unified-python-client.md) supersedes the final sentence above: the CLI and filesystem client now share one Python distribution while retaining separate internal modules and runtime boundaries. The modular-monorepo decision remains in force.
+
 ## Consequences
 
 - One change can update the API, clients, documentation, and end-to-end tests atomically.

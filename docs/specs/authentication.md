@@ -96,7 +96,7 @@ An environment variable may override stored credentials for non-interactive oper
 
 Credentials are scoped by installation hostname and account. Commands must not send a credential to a different hostname after redirects or configuration changes.
 
-The Python filesystem client authenticates with a manually issued access token or another explicitly supported headless credential and sends it as a bearer token. It must not depend on the `niyan` executable at runtime. Reusing a CLI-established credential, if supported, must occur through a documented credential-store contract rather than importing or executing CLI internals.
+The Python filesystem client authenticates with an explicitly supplied access token or another supported headless credential and sends it as a bearer token. Because the filesystem client and CLI share one Python distribution, they may use the same internal credential-discovery and storage contract. Filesystem code must not import CLI user-interface modules, invoke the `niyan` console entry point, or perform credential discovery merely because it was imported.
 
 The public environment-variable contract is `NIYAN_HOST` for the selected installation and `NIYAN_TOKEN` for an explicitly supplied access token. Environment credentials take precedence over stored credentials for that process.
 
@@ -144,4 +144,4 @@ Redirects must not forward authorization headers or Git credentials to another o
 - Refresh-token rotation.
 - Namespace-level token boundaries or one token spanning an explicit allowlist of multiple datasets.
 
-The initial CLI may offer a mode-`0600` plaintext credential file only through an explicit `--insecure-storage` choice with a warning; it must never select that fallback automatically. The Python client initially uses an explicitly supplied, manually issued access token rather than reading CLI credential-store entries.
+The initial CLI may offer a mode-`0600` plaintext credential file only through an explicit `--insecure-storage` choice with a warning; it must never select that fallback automatically. The filesystem client must support an explicitly supplied token for headless environments and may reuse a stored credential only through the package's documented shared credential contract.

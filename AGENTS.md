@@ -6,7 +6,7 @@ This file applies to the entire repository. Add a narrower `AGENTS.md` only when
 
 ## Product
 
-Niyān is an open-source, self-hosted data forge for researchers and machine-learning teams. A dataset is a standard Git repository whose large file content is stored through Git LFS in S3-compatible object storage. The Django control plane supplies identity, authorization, namespaces, policy, and a public REST API; the Nuxt application supplies the web experience; the standalone `niyan` CLI makes the Git and Git LFS workflow approachable; and a separate Python package provides read-only `fsspec` access to dataset files.
+Niyān is an open-source, self-hosted data forge for researchers and machine-learning teams. A dataset is a standard Git repository whose large file content is stored through Git LFS in S3-compatible object storage. The Django control plane supplies identity, authorization, namespaces, policy, and a public REST API; the Nuxt application supplies the web experience; and one Python package provides both the `niyan` CLI and read-only `fsspec` access to dataset files.
 
 Niyān builds around Git. It must not create a second, competing model of commits, trees, branches, tags, or merges.
 
@@ -31,7 +31,7 @@ Documents marked `Draft` or ADRs marked `Proposed` are review material, not sett
 - PostgreSQL is authoritative for control-plane state. Any indexed Git metadata in PostgreSQL must be rebuildable from the repository.
 - Read authorization is at the dataset boundary. There are no path-level read ACLs. Branch protection governs ref mutation; it must not be presented as confidential branch-level read isolation.
 - The core remains format-agnostic. Format-specific browser experiences belong in viewer plugins.
-- The Python client is a proper PyPI package, distinct from the CLI. Its v1 purpose is read-only, `fsspec`-compatible streaming and downloading without requiring a Git checkout or direct S3 credentials.
+- The CLI and Python filesystem client are distributed together as the `niyan` PyPI package. They may share internal HTTP, authentication, configuration, and transfer primitives, but the filesystem client must remain usable without invoking CLI code, installing Git or Git LFS, or creating a checkout.
 - The REST API is a public product surface and must be versioned deliberately.
 - The product does not include experiment tracking, metrics, data pipelines, or a CI/CD system.
 - Protocols and on-disk formats must be documented so users are not trapped in a Niyān server.
@@ -43,8 +43,7 @@ The repository is a modular monorepo. Directories may be introduced incrementall
 ```text
 apps/server/                    Django and Django Ninja control plane
 apps/web/                       Nuxt and Vue web application
-clients/cli/                    Standalone niyan CLI
-clients/python/                 PyPI package and fsspec filesystem
+clients/python/                 Unified niyan PyPI package, CLI, and fsspec filesystem
 packages/viewer-sdk/            Viewer plugin contracts and helpers
 plugins/examples/               Example viewer plugins
 contracts/                      Shared and generated API contracts
@@ -56,8 +55,9 @@ docs/architecture/decisions/    Architecture decision records
 
 Keep component boundaries real:
 
-- The CLI communicates through documented Git, Git LFS, and REST interfaces; it must not import server internals.
-- The Python client communicates through the public REST and authorized data-transfer interfaces. It must not shell out to the CLI, require a local Git checkout, or import server internals.
+- The unified Python package communicates through documented Git, Git LFS, REST, and authorized data-transfer interfaces; it must not import server internals.
+- The CLI and filesystem client must remain separate internal modules. Shared code belongs in narrowly scoped transport, authentication, configuration, or model modules rather than one module importing the other's user interface.
+- The filesystem client must not invoke the CLI entry point, shell out to Git or Git LFS, require a local checkout, or perform network, credential-store, or Git discovery merely because it was imported.
 - The web application treats the REST API as its server boundary. Authorization decisions are never delegated to browser code.
 - Viewer plugins consume an explicit, versioned contract. They must not reach into server or web internals.
 - Shared code must have a genuine cross-component contract. Do not create a generic dumping-ground package.
@@ -120,7 +120,7 @@ Do not invent formatter, package-manager, migration, or test commands before the
 
 - The `niyan` CLI is the supported user-facing interface for cloning, adding, updating, committing, and synchronizing datasets. It may require and invoke Git and Git LFS as implementation dependencies, but product documentation and workflows must not instruct users to operate dataset repositories with the Git CLI directly.
 - Standard Git compatibility remains an interoperability, maintenance, and recovery property rather than a parallel supported user experience.
-- Distribute the CLI independently from the Python client. The primary installation path should be a single-command bootstrap installer, with checksums and a documented manual alternative.
+- Publish the CLI as the `niyan` console entry point of the unified Python package. Support `pipx install niyan` as the standard isolated Python installation and provide a single-command bootstrap installer with checksums and a documented manual alternative.
 - Delegate repository mechanics to Git and transfers to Git LFS wherever their documented behavior is sufficient.
 - Keep stdout suitable for requested command output and use stderr for diagnostics and progress.
 - Support non-interactive use, streaming transfers, resumable behavior where the underlying protocol allows it, and clear exit codes.
@@ -128,11 +128,11 @@ Do not invent formatter, package-manager, migration, or test commands before the
 
 ### Python Client
 
-- Publish the Python client as an independently versioned PyPI package with an `fsspec`-compatible, read-only filesystem.
+- Publish the Python client and CLI together as the versioned `niyan` PyPI package with an `fsspec`-compatible, read-only filesystem.
 - Keep the v1 scope narrow: list and inspect paths, open files for binary streaming, perform ranged reads and seeks where supported, and download files without loading them entirely into memory.
 - Resolve a dataset revision to an exact Git commit before transferring content. Recursive operations must remain pinned to that commit for their duration.
 - Obtain authorized transfer URLs through the public API and refresh expired URLs transparently. Never require or expose raw S3 credentials.
-- Do not require Git, Git LFS, the `niyan` CLI, or a repository checkout at runtime.
+- Do not require Git, Git LFS, invoking the `niyan` console entry point, or a repository checkout for filesystem-client operations.
 - Preserve standard `fsspec` behavior so pandas, Polars, PyArrow, xarray, Dask, and similar consumers can use the filesystem without Niyān-specific adapters.
 - Treat HPC and headless systems as first-class environments: support token authentication, low-memory streaming, clear timeouts, and interruption-safe downloads.
 

@@ -18,9 +18,9 @@ Architecture decision records use corresponding `Proposed`, `Accepted`, `Depreca
 - [Authentication](authentication.md) — browser sessions, CLI login, access tokens, scopes, and credential handling.
 - [Authorization](authorization.md) — namespace roles, dataset grants, permission inheritance, and the shared policy boundary.
 - [Repository access](repository-access.md) — read-only Git-over-HTTPS transport and repository browsing APIs.
-- [CLI](cli.md) — authentication, credential selection, and dataset cloning behavior for the standalone client.
+- [CLI](cli.md) — the command surface and behavior of the `niyan` console entry point.
 - [Namespaces and datasets](namespaces-and-datasets.md) — stable identity, human-facing paths, and dataset repository creation.
-- [Python filesystem client](python-client.md) — the read-only PyPI package for `fsspec` streaming and downloads.
+- [Python filesystem client](python-client.md) — the unified package's read-only `fsspec` surface for streaming and downloads.
 
 As the design becomes concrete, split the overview into focused specifications for the dataset model, Git LFS protocol, storage lifecycle, authorization, CLI, REST API, viewer plugins, and deployment. Do not create those documents merely to fill out a directory; create each when it has enough substance to review.
 
