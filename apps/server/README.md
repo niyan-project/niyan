@@ -8,6 +8,10 @@ The server reads runtime configuration from environment variables. For local dev
 
 `django-ninja` defines the versioned REST API, validates its request and response schemas, and generates its OpenAPI description so those contracts do not need to be implemented separately on top of Django.
 
+`boto3` and `botocore` provide the standard S3 client, Signature V4 signing, custom-endpoint support, retry behavior, and presigned actions. `NIYAN_S3_*` settings select the private bucket, region, endpoint, addressing style, installation key prefix, credentials, TLS verification, and bounded client timeouts. Explicit access and secret keys must be configured together; when both are omitted, the standard AWS credential chain remains available for managed deployment identities.
+
+The object-store adapter exposes metadata, signing, multipart-control, and deletion operations only. Upload and download bodies travel directly between clients and object storage and are never accepted or proxied by Django.
+
 ## System dependencies
 
 The server requires a Git installation that includes `git-http-backend`. Git initializes bare dataset repositories, serves smart-HTTP clone and fetch operations, and supplies authoritative repository metadata for the browsing API.

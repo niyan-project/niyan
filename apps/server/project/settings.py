@@ -15,6 +15,8 @@ from pathlib import Path
 import environ
 from django.core.exceptions import ImproperlyConfigured
 
+from datasets.object_storage import S3Configuration
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -86,6 +88,25 @@ DATABASES = {
 }
 
 REPOSITORIES_ROOT = Path(env('NIYAN_REPOSITORIES_ROOT')).expanduser()
+
+try:
+    NIYAN_S3_CONFIGURATION = S3Configuration(
+        endpoint_url=env('NIYAN_S3_ENDPOINT_URL', default=None),
+        region_name=env('NIYAN_S3_REGION', default='us-east-1'),
+        bucket=env('NIYAN_S3_BUCKET'),
+        access_key_id=env('NIYAN_S3_ACCESS_KEY_ID', default=None),
+        secret_access_key=env('NIYAN_S3_SECRET_ACCESS_KEY', default=None),
+        session_token=env('NIYAN_S3_SESSION_TOKEN', default=None),
+        addressing_style=env('NIYAN_S3_ADDRESSING_STYLE', default='auto'),
+        signature_version=env('NIYAN_S3_SIGNATURE_VERSION', default='s3v4'),
+        key_prefix=env('NIYAN_S3_KEY_PREFIX', default='niyan'),
+        verify_tls=env.bool('NIYAN_S3_VERIFY_TLS', default=True),
+        connect_timeout_seconds=env.int('NIYAN_S3_CONNECT_TIMEOUT_SECONDS', default=5),
+        read_timeout_seconds=env.int('NIYAN_S3_READ_TIMEOUT_SECONDS', default=30),
+        max_attempts=env.int('NIYAN_S3_MAX_ATTEMPTS', default=3),
+    )
+except ValueError as error:
+    raise ImproperlyConfigured(str(error)) from error
 
 NIYAN_ACCESS_TOKEN_MAX_DAYS = env.int('NIYAN_ACCESS_TOKEN_MAX_DAYS', default=365)
 NIYAN_DEVICE_AUTHORIZATION_LIFETIME_SECONDS = env.int('NIYAN_DEVICE_AUTHORIZATION_LIFETIME_SECONDS', default=600)
