@@ -15,6 +15,7 @@ Architecture decision records use corresponding `Proposed`, `Accepted`, `Depreca
 ## Current Documents
 
 - [System overview](system-overview.md) — the initial product boundary, system model, workflows, and open questions.
+- [Namespaces and datasets](namespaces-and-datasets.md) — stable identity, human-facing paths, and dataset repository creation.
 - [Python filesystem client](python-client.md) — the read-only PyPI package for `fsspec` streaming and downloads.
 
 As the design becomes concrete, split the overview into focused specifications for the dataset model, Git LFS protocol, storage lifecycle, authorization, CLI, REST API, viewer plugins, and deployment. Do not create those documents merely to fill out a directory; create each when it has enough substance to review.
