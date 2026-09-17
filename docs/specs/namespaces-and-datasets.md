@@ -97,13 +97,16 @@ Read and update operations must not reveal whether another user's private datase
 
 Expected client-visible failures are unauthenticated access, an unknown namespace, denied namespace access, an invalid slug, a conflicting path, and repository provisioning failure. Responses must not disclose repository filesystem paths, Git process output, database details, or credentials.
 
-## Initial Non-goals
+## Scope Boundaries
 
-- Creating groups, group memberships, or role grants.
+This lifecycle specification does not define the following behavior. Later focused specifications may define and implement it without superseding the namespace and dataset model here.
+
+- Group and dataset role evaluation, which is defined by [Authorization](authorization.md).
 - Registering or importing an existing Git repository.
 - Browser file upload or initial commits.
-- Git smart HTTP, Git LFS, or S3 transfer endpoints.
-- Repository browsing or metadata indexing.
+- Git smart HTTP and repository browsing, which are defined by [Repository access](repository-access.md).
+- Git LFS or S3 transfer endpoints.
+- Repository metadata indexing.
 - Dataset transfer, export, or namespace moves.
 - Public visibility and anonymous access.
 

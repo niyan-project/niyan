@@ -1,3 +1,6 @@
+import base64
+import binascii
+
 from ninja.errors import AuthorizationError
 from ninja.security import HttpBearer, django_auth
 
@@ -71,3 +74,52 @@ def get_access_token(request):
     """Return bearer-token metadata when the current request used it."""
 
     return getattr(request, 'access_token', None)
+
+
+def authenticate_git_basic(request):
+    """Authenticate an access token supplied as an HTTPS Basic password.
+
+    Parameters
+    ----------
+    request : django.http.HttpRequest
+        Smart-HTTP request carrying a Basic authorization header.
+
+    Returns
+    -------
+    accounts.models.AccessToken or None
+        Active access token, or ``None`` for malformed or rejected credentials.
+    """
+
+    authorization = request.headers.get('Authorization', '')
+    scheme, separator, encoded = authorization.partition(' ')
+    if not separator or scheme.lower() != 'basic' or not encoded:
+        return None
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode('utf-8')
+        _, password = decoded.split(':', 1)
+        return authenticate_access_token(password)
+    except (binascii.Error, UnicodeDecodeError, ValueError, InvalidAccessToken):
+        return None
+
+
+def access_token_permits(*, access_token, scope, dataset_id):
+    """Return whether token scope and resource boundary permit a dataset.
+
+    Parameters
+    ----------
+    access_token : accounts.models.AccessToken
+        Authenticated credential metadata.
+    scope : str
+        Required operation scope.
+    dataset_id : uuid.UUID
+        Immutable dataset being accessed.
+
+    Returns
+    -------
+    bool
+        Whether credential-level restrictions permit the operation.
+    """
+
+    if not access_token_allows_scope(access_token, scope):
+        return False
+    return access_token.resource_boundary == AccessToken.ResourceBoundary.USER or access_token.dataset_id == dataset_id

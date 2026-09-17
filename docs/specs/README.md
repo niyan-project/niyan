@@ -16,6 +16,9 @@ Architecture decision records use corresponding `Proposed`, `Accepted`, `Depreca
 
 - [System overview](system-overview.md) — the initial product boundary, system model, workflows, and open questions.
 - [Authentication](authentication.md) — browser sessions, CLI login, access tokens, scopes, and credential handling.
+- [Authorization](authorization.md) — namespace roles, dataset grants, permission inheritance, and the shared policy boundary.
+- [Repository access](repository-access.md) — read-only Git-over-HTTPS transport and repository browsing APIs.
+- [CLI](cli.md) — authentication, credential selection, and dataset cloning behavior for the standalone client.
 - [Namespaces and datasets](namespaces-and-datasets.md) — stable identity, human-facing paths, and dataset repository creation.
 - [Python filesystem client](python-client.md) — the read-only PyPI package for `fsspec` streaming and downloads.
 

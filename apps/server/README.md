@@ -7,3 +7,7 @@ The server reads runtime configuration from environment variables. For local dev
 `django-environ` provides typed environment parsing, including Django database URLs. `psycopg` is the PostgreSQL adapter required by Django for `NIYAN_DATABASE_URL` connections.
 
 `django-ninja` defines the versioned REST API, validates its request and response schemas, and generates its OpenAPI description so those contracts do not need to be implemented separately on top of Django.
+
+## System dependencies
+
+The server requires a Git installation that includes `git-http-backend`. Git initializes bare dataset repositories, serves smart-HTTP clone and fetch operations, and supplies authoritative repository metadata for the browsing API.

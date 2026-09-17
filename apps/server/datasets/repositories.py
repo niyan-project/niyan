@@ -16,6 +16,10 @@ class RepositoryDeletionError(RuntimeError):
     """Report repository deletion failure without exposing filesystem internals."""
 
 
+class RepositoryReadError(RuntimeError):
+    """Report a repository that cannot be safely opened for reading."""
+
+
 @dataclass(frozen=True)
 class ProvisionedRepository:
     """Track a repository created by one operation so it can be rolled back safely."""
@@ -116,6 +120,34 @@ class GitRepositoryStore:
             raise RepositoryProvisioningError('Git could not initialize the dataset repository.') from error
 
         return ProvisionedRepository(root=root, path=final_path)
+
+    def existing_path(self, dataset_id):
+        """Return a safe existing bare repository path.
+
+        Parameters
+        ----------
+        dataset_id : uuid.UUID or str
+            Immutable dataset identifier.
+
+        Returns
+        -------
+        pathlib.Path
+            Resolved repository path beneath the configured root.
+
+        Raises
+        ------
+        RepositoryReadError
+            If the root or repository is missing, linked, or outside the root.
+        """
+
+        root = self.root.resolve()
+        path = self.path_for(dataset_id)
+        if not root.is_dir() or path.is_symlink() or not path.is_dir():
+            raise RepositoryReadError('The dataset repository is unavailable.')
+        resolved_path = path.resolve()
+        if resolved_path.parent != root:
+            raise RepositoryReadError('The dataset repository is unavailable.')
+        return resolved_path
 
     def delete(self, dataset_id, *, allow_missing=False):
         """Permanently remove a dataset's bare Git repository.
