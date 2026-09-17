@@ -38,7 +38,7 @@ Users may also create access tokens manually for automation, scheduled jobs, HPC
 
 A manually issued token has a user-provided name, selected scopes, a user-level or single-dataset resource boundary, an expiry, creation and last-used timestamps, and revocation state. The complete token value is returned only once when it is created. The server stores a cryptographic digest rather than the recoverable secret. Listing tokens returns metadata and a non-secret identifying prefix, never the credential itself.
 
-Token creation, listing, and revocation initially require a browser-authenticated session. One token must not be able to create another token. A user may supply an existing access token to the CLI through standard input, and automation may provide one through an environment variable. Tokens must not be accepted as command-line arguments or embedded in dataset URLs.
+Token creation, listing, and revocation of another token initially require a browser-authenticated session. A bearer token may revoke itself so `niyan auth logout` can complete the credential lifecycle, but it must not create, list, inspect, or revoke any other token. A user may supply an existing access token to the CLI through standard input, and automation may provide one through an environment variable. Tokens must not be accepted as command-line arguments or embedded in dataset URLs.
 
 ## Resource Boundaries
 
@@ -124,7 +124,7 @@ The versioned REST API provides the following authentication operations:
 - poll a device authorization and exchange an approved device code for its complete access token once; and
 - inspect the currently authenticated user and access-token metadata.
 
-Token-management and device-approval operations require a browser-authenticated session and must not accept bearer-token authentication. Device initiation and polling are unauthenticated but rate-limited. Polling distinguishes pending, denied, expired, and successful authorization without revealing user information before success.
+Token-management and device-approval operations require a browser-authenticated session, except that an active bearer token may revoke itself. Device initiation and polling are unauthenticated but rate-limited. Polling distinguishes pending, denied, expired, and successful authorization without revealing user information before success.
 
 The access-token secret returned by manual creation or device exchange is never returned again. Token listing and current-credential inspection return only metadata and a non-secret fingerprint.
 

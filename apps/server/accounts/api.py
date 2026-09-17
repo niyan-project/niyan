@@ -240,9 +240,13 @@ def create_access_token_endpoint(request, payload: AccessTokenCreateInput):
     return Status(201, response)
 
 
-@router.delete('/tokens/{token_id}', auth=django_auth, response={204: None, 401: ErrorResponse, 404: ErrorResponse})
+@router.delete('/tokens/{token_id}', auth=session_or_access_token, response={204: None, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse})
 def revoke_access_token_endpoint(request, token_id: UUID):
-    """Revoke one access token owned by the browser user."""
+    """Revoke a browser-selected token or the active bearer token itself."""
+
+    authenticating_token = get_access_token(request)
+    if authenticating_token is not None and authenticating_token.id != token_id:
+        return Status(403, {'code': 'token_self_revocation_required', 'detail': 'An access token may revoke only itself.'})
 
     access_token = AccessToken.objects.filter(pk=token_id, user=request.auth).first()
     if access_token is None:

@@ -108,8 +108,8 @@ niyan auth login [hostname] --local
 niyan auth login [hostname] --dataset <namespace/dataset>
 niyan auth login [hostname] --read-only
 niyan auth login [hostname] --with-token
-niyan auth status [--host <host>]
-niyan auth logout [--host <host>] [--local] [--forget]
+niyan auth status [--host <host>] [--dataset <namespace/dataset>]
+niyan auth logout [--host <host>] [--local] [--dataset <namespace/dataset>] [--forget]
 ```
 
 `auth login` uses the browser-assisted device flow by default. It opens the verification page when possible, prints the verification URL and user code for headless environments, respects the server-provided polling interval, and stores a token only after approval.
@@ -120,7 +120,9 @@ Without `--local`, the token binding is available from any working directory. Wi
 
 Credential selection order is checkout-local exact dataset binding, user-configured exact dataset binding, checkout-local user-level binding, then user-configured user-level binding. A missing, rejected, expired, or revoked selected credential is reported without silently falling back to a broader credential.
 
-`auth status` reports the selected host, account, binding scope, token scopes, expiry, storage method, and whether the server accepts the credential. It never displays the token. `auth logout` revokes the selected token before removing its binding and secret. `--forget` removes the local binding and secret without server revocation after an explicit warning; it exists only for recovery when the server is unreachable and must not claim that revocation succeeded.
+`auth status` reports the selected host, account, binding scope, token scopes, expiry, storage method, and whether the server accepts the credential. It never displays the token. `--dataset` selects an exact dataset-bound credential before a broader user credential.
+
+`auth logout` targets user configuration by default; `--local` targets the current checkout's configuration. `--dataset` targets an exact dataset binding instead of that configuration's user-level binding. Logout revokes the selected token before removing its binding and secret. `--forget` removes the selected binding and secret without server revocation after an explicit warning; it exists only for recovery when the server is unreachable and must not claim that revocation succeeded.
 
 ## Dataset Forge Operations
 

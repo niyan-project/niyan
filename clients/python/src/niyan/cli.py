@@ -1,12 +1,13 @@
 import argparse
+import getpass
 import sys
 from pathlib import Path
 
 from niyan import __version__
-from niyan.auth import login, resolve_host
+from niyan.auth import authentication_status, login, login_with_token, logout, resolve_host
 from niyan.config import AppPaths
 from niyan.credentials import CredentialStores
-from niyan.errors import NiyanCliError
+from niyan.errors import ApiError, ConfigurationError, CredentialError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper
 
 
@@ -26,6 +27,17 @@ def build_parser():
     login_parser.add_argument('--read-only', action='store_true', help='Request read-only API and repository scopes.')
     login_parser.add_argument('--insecure-storage', action='store_true', help='Explicitly store the token in a mode-0600 plaintext user file.')
     login_parser.add_argument('--no-browser', action='store_true', help='Print verification instructions without opening a browser.')
+    login_parser.add_argument('--with-token', action='store_true', help='Read one manually issued access token from standard input.')
+
+    status_parser = auth_commands.add_parser('status', help='Inspect the selected credential and verify it with the server.')
+    status_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+    status_parser.add_argument('--dataset', help='Select an exact dataset-bound credential before a user-level credential.')
+
+    logout_parser = auth_commands.add_parser('logout', help='Revoke and remove one configured access token.')
+    logout_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+    logout_parser.add_argument('--local', action='store_true', help='Target the current checkout binding instead of user configuration.')
+    logout_parser.add_argument('--dataset', help='Target an exact dataset-bound credential instead of the user-level binding.')
+    logout_parser.add_argument('--forget', action='store_true', help='Remove local credential state without server revocation.')
 
     dataset_parser = commands.add_parser('dataset', help='Work with dataset repositories.')
     dataset_commands = dataset_parser.add_subparsers(dest='dataset_command', required=True)
@@ -89,15 +101,45 @@ def main(argv=None):
             )
         if arguments.command == 'auth' and arguments.auth_command == 'login':
             host = resolve_host(arguments.hostname, paths=paths, cwd=Path.cwd())
-            login(
+            if arguments.with_token:
+                if arguments.read_only or arguments.no_browser:
+                    parser.error('--with-token cannot be combined with --read-only or --no-browser because the token already has server-defined scopes.')
+                login_with_token(
+                    host=host,
+                    raw_token=_read_access_token(),
+                    paths=paths,
+                    stores=stores,
+                    local=arguments.local,
+                    dataset_path=arguments.dataset,
+                    insecure_storage=arguments.insecure_storage,
+                    cwd=Path.cwd(),
+                )
+            else:
+                login(
+                    host=host,
+                    paths=paths,
+                    stores=stores,
+                    local=arguments.local,
+                    dataset_path=arguments.dataset,
+                    read_only=arguments.read_only,
+                    insecure_storage=arguments.insecure_storage,
+                    no_browser=arguments.no_browser,
+                    cwd=Path.cwd(),
+                )
+            return 0
+        if arguments.command == 'auth' and arguments.auth_command == 'status':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            accepted = authentication_status(host=host, paths=paths, stores=stores, dataset_path=arguments.dataset, cwd=Path.cwd())
+            return 0 if accepted else 3
+        if arguments.command == 'auth' and arguments.auth_command == 'logout':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            logout(
                 host=host,
                 paths=paths,
                 stores=stores,
                 local=arguments.local,
                 dataset_path=arguments.dataset,
-                read_only=arguments.read_only,
-                insecure_storage=arguments.insecure_storage,
-                no_browser=arguments.no_browser,
+                forget=arguments.forget,
                 cwd=Path.cwd(),
             )
             return 0
@@ -115,7 +157,51 @@ def main(argv=None):
         parser.error('Unsupported command.')
     except NiyanCliError as error:
         print(f'error: {error}', file=sys.stderr)
-        return 1
+        return _error_exit_status(error)
+
+
+def _read_access_token(*, stdin=None, secret_prompt=getpass.getpass):
+    """Read one access token without accepting it as a command argument.
+
+    Parameters
+    ----------
+    stdin : file-like object, optional
+        Standard input override used by tests.
+    secret_prompt : callable, optional
+        Non-echoing terminal prompt.
+
+    Returns
+    -------
+    str
+        Unvalidated token text for server-backed login validation.
+    """
+
+    stream = stdin or sys.stdin
+    try:
+        interactive = stream.isatty()
+    except (AttributeError, OSError):
+        interactive = False
+    value = secret_prompt('Access token: ') if interactive else stream.read(4097)
+    if len(value) > 4096:
+        raise CredentialError('The supplied access token is too long.')
+    return value
+
+
+def _error_exit_status(error):
+    """Map public authentication failures to the documented exit categories."""
+
+    if isinstance(error, CredentialError):
+        return 3
+    if isinstance(error, ApiError):
+        if error.status == 401:
+            return 3
+        if error.status == 403:
+            return 4
+        if error.status is None:
+            return 7
+    if isinstance(error, ConfigurationError):
+        return 2
+    return 1
 
 
 if __name__ == '__main__':

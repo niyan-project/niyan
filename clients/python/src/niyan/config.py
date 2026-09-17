@@ -70,6 +70,9 @@ class CredentialBinding:
     storage: str
     dataset_id: str | None = None
     dataset_path: str | None = None
+    resource_boundary: str = 'user'
+    scopes: tuple[str, ...] = ()
+    expires_at: str | None = None
 
     @classmethod
     def from_dict(cls, value):
@@ -96,12 +99,30 @@ class CredentialBinding:
         storage = value.get('storage')
         if storage not in ('keyring', 'file'):
             raise ConfigurationError('Niyān credential storage configuration is invalid.')
+        dataset_id = value.get('dataset_id')
+        dataset_path = value.get('dataset_path')
+        resource_boundary = value.get('resource_boundary', 'dataset' if dataset_id else 'user')
+        scopes = value.get('scopes', [])
+        expires_at = value.get('expires_at')
+        if dataset_id is not None and not isinstance(dataset_id, str):
+            raise ConfigurationError('Niyān credential dataset identity is invalid.')
+        if dataset_path is not None and not isinstance(dataset_path, str):
+            raise ConfigurationError('Niyān credential dataset path is invalid.')
+        if resource_boundary not in ('user', 'dataset'):
+            raise ConfigurationError('Niyān credential resource boundary is invalid.')
+        if not isinstance(scopes, list) or any(not isinstance(scope, str) for scope in scopes):
+            raise ConfigurationError('Niyān credential scopes are invalid.')
+        if expires_at is not None and not isinstance(expires_at, str):
+            raise ConfigurationError('Niyān credential expiry is invalid.')
         return cls(
             token_id=value['token_id'],
             username=value['username'],
             storage=storage,
-            dataset_id=value.get('dataset_id'),
-            dataset_path=value.get('dataset_path'),
+            dataset_id=dataset_id,
+            dataset_path=dataset_path,
+            resource_boundary=resource_boundary,
+            scopes=tuple(scopes),
+            expires_at=expires_at,
         )
 
     def to_dict(self):
@@ -113,7 +134,9 @@ class CredentialBinding:
             Binding fields suitable for CLI configuration.
         """
 
-        return {key: value for key, value in asdict(self).items() if value is not None}
+        encoded = {key: value for key, value in asdict(self).items() if value is not None}
+        encoded['scopes'] = list(self.scopes)
+        return encoded
 
 
 @dataclass
@@ -218,6 +241,37 @@ class Configuration:
         if not include_default:
             return None
         encoded_binding = host_config.get('default')
+        return CredentialBinding.from_dict(encoded_binding) if encoded_binding is not None else None
+
+    def remove_binding(self, *, host, dataset_path=None):
+        """Remove and return one exact dataset or user-level binding.
+
+        Parameters
+        ----------
+        host : str
+            Normalized installation origin.
+        dataset_path : str, optional
+            Exact dataset binding to remove. Omission targets the host default.
+
+        Returns
+        -------
+        CredentialBinding or None
+            Removed binding when one existed.
+        """
+
+        host_config = self.hosts.get(host)
+        if not isinstance(host_config, dict):
+            return None
+        if dataset_path is not None:
+            datasets = host_config.get('datasets', {})
+            encoded_binding = datasets.pop(dataset_path, None) if isinstance(datasets, dict) else None
+        else:
+            encoded_binding = host_config.pop('default', None)
+        datasets = host_config.get('datasets', {})
+        if 'default' not in host_config and (not isinstance(datasets, dict) or not datasets):
+            self.hosts.pop(host, None)
+            if self.default_host == host:
+                self.default_host = None
         return CredentialBinding.from_dict(encoded_binding) if encoded_binding is not None else None
 
 

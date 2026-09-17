@@ -309,7 +309,7 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
             environment = os.environ.copy()
             environment.update(
                 {
-                    'PYTHONPATH': str(repository_root / 'clients' / 'cli' / 'src'),
+                    'PYTHONPATH': str(repository_root / 'clients' / 'python' / 'src'),
                     'XDG_CONFIG_HOME': str(state_root / 'config'),
                     'XDG_DATA_HOME': str(state_root / 'data'),
                     'NIYAN_HOST': host,

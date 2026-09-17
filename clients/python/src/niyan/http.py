@@ -116,6 +116,22 @@ class ApiClient:
 
         return self.request('GET', '/api/v1/auth/me')
 
+    def revoke_access_token(self, token_id):
+        """Revoke the active access token by immutable identifier.
+
+        Parameters
+        ----------
+        token_id : str
+            Server-issued access-token UUID.
+
+        Returns
+        -------
+        tuple[int, dict]
+            Empty successful response metadata.
+        """
+
+        return self.request('DELETE', f'/api/v1/auth/tokens/{token_id}')
+
     def resolve_dataset(self, dataset_path):
         """Resolve a human-facing dataset path to immutable Git identity.
 

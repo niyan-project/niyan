@@ -128,6 +128,34 @@ class AccessTokenApiTests(TestCase):
         self.assertEqual(authenticated_response.status_code, 401)
         self.assertIsNotNone(AccessToken.objects.get().revoked_at)
 
+    def test_bearer_token_can_revoke_only_itself(self):
+        """Support CLI logout without granting bearer token management."""
+
+        first = self.issue_token(name='First').json()
+        second = self.issue_token(name='Second').json()
+        self.client.logout()
+
+        other_response = self.client.delete(f"/api/v1/auth/tokens/{second['id']}", HTTP_AUTHORIZATION=f"Bearer {first['token']}")
+        self_response = self.client.delete(f"/api/v1/auth/tokens/{first['id']}", HTTP_AUTHORIZATION=f"Bearer {first['token']}")
+
+        self.assertEqual(other_response.status_code, 403)
+        self.assertEqual(other_response.json()['code'], 'token_self_revocation_required')
+        self.assertEqual(self_response.status_code, 204)
+        self.assertIsNotNone(AccessToken.objects.get(pk=first['id']).revoked_at)
+        self.assertIsNone(AccessToken.objects.get(pk=second['id']).revoked_at)
+
+    def test_session_token_revocation_remains_csrf_protected(self):
+        """Keep browser revocation protected after enabling self-revocation."""
+
+        issued = self.issue_token().json()
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.user)
+
+        response = csrf_client.delete(f"/api/v1/auth/tokens/{issued['id']}")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIsNone(AccessToken.objects.get(pk=issued['id']).revoked_at)
+
     def test_dataset_boundary_is_persisted_by_immutable_identity(self):
         """Bind a token to the dataset UUID while displaying its current path."""
 

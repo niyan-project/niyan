@@ -22,7 +22,7 @@ The distribution is versioned and released as one product. `pipx install niyan` 
 
 The CLI and filesystem implementation remain separate internal modules. They may depend on narrowly scoped shared modules for HTTP, authentication, configuration, models, errors, and transfer behavior. Filesystem code must not import CLI user-interface modules, invoke the console entry point, shell out to Git or Git LFS, or require a repository checkout. Importing the package must not itself inspect Git state, access a credential store, or perform network I/O.
 
-The unified package initially lives under `clients/python/`. The existing prototype under `clients/cli/` will move only in a separately reviewed implementation stage.
+The unified package lives under `clients/python/`; the original CLI prototype moved there in a separately reviewed implementation stage.
 
 This decision supersedes the independent CLI and Python-client distribution requirement in [ADR 0001](0001-modular-monorepo.md). It does not weaken the boundary between client code and Django server internals.
 
