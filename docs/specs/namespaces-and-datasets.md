@@ -81,9 +81,19 @@ The service must reject an existing final repository path rather than adopting o
 
 ## Initial API Boundary
 
-The public API must be versioned under `/api/v1/`. The first creation endpoint should accept an immutable namespace UUID together with the dataset slug and display name. A successful response must return the immutable dataset UUID, current namespace path, slug, display name, and creation timestamp.
+The public API must be versioned under `/api/v1/`. Dataset creation accepts an immutable namespace UUID together with the dataset slug and display name. A successful response returns the immutable dataset and namespace UUIDs, current namespace path, slug, display name, and creation timestamp.
 
 The endpoint must require an authenticated user and call the domain service rather than performing Git or filesystem work directly. The first implementation may allow creation only in the caller's personal namespace. Group role evaluation, scoped tokens, visibility changes, and protected-ref policy belong to the authorization specification and later stages.
+
+An authenticated user may retrieve a dataset in their personal namespace by immutable dataset UUID. They may also list datasets in their personal namespace by immutable namespace UUID using limit-and-offset pagination. Dataset lists are ordered by creation timestamp and then UUID so repeated requests have a deterministic order. The initial page limit must not exceed 100 datasets.
+
+An authenticated owner may update a dataset's display name, slug, or both. Changing a slug changes its human-facing path but does not change the dataset UUID or UUID-derived repository location. Empty updates, null values, invalid slugs, and conflicting namespace paths must be rejected.
+
+An authenticated owner may permanently delete a dataset. Deletion is irreversible: the control-plane record and bare Git repository must be removed, and the same contract will apply to dataset-owned Git LFS objects when LFS storage is implemented. Confirmation of the exact dataset path belongs in interactive clients such as the web application; the authenticated API operation itself does not implement a confirmation prompt.
+
+Deletion may use a short-lived internal state to coordinate durable metadata and repository storage, but that state is not archival and cannot be restored. A dataset undergoing deletion must immediately become unavailable to ordinary reads and updates. Interrupted deletions must be safe to retry, and the control-plane record must not be removed until repository deletion succeeds.
+
+Read and update operations must not reveal whether another user's private dataset or namespace exists. An inaccessible identity has the same response as an unknown identity. This rule must remain true when group authorization is added.
 
 Expected client-visible failures are unauthenticated access, an unknown namespace, denied namespace access, an invalid slug, a conflicting path, and repository provisioning failure. Responses must not disclose repository filesystem paths, Git process output, database details, or credentials.
 
@@ -94,7 +104,7 @@ Expected client-visible failures are unauthenticated access, an unknown namespac
 - Browser file upload or initial commits.
 - Git smart HTTP, Git LFS, or S3 transfer endpoints.
 - Repository browsing or metadata indexing.
-- Dataset deletion, transfer, export, or namespace moves.
+- Dataset transfer, export, or namespace moves.
 - Public visibility and anonymous access.
 
 ## Compatibility Requirements

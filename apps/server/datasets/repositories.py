@@ -12,6 +12,10 @@ class RepositoryProvisioningError(RuntimeError):
     """Report repository provisioning failure without exposing Git internals."""
 
 
+class RepositoryDeletionError(RuntimeError):
+    """Report repository deletion failure without exposing filesystem internals."""
+
+
 @dataclass(frozen=True)
 class ProvisionedRepository:
     """Track a repository created by one operation so it can be rolled back safely."""
@@ -112,3 +116,43 @@ class GitRepositoryStore:
             raise RepositoryProvisioningError('Git could not initialize the dataset repository.') from error
 
         return ProvisionedRepository(root=root, path=final_path)
+
+    def delete(self, dataset_id, *, allow_missing=False):
+        """Permanently remove a dataset's bare Git repository.
+
+        Parameters
+        ----------
+        dataset_id : uuid.UUID or str
+            Immutable dataset identifier.
+        allow_missing : bool, optional
+            Permit an absent repository when resuming an interrupted deletion.
+
+        Raises
+        ------
+        RepositoryDeletionError
+            If repository storage is unavailable, inconsistent, or cannot be removed.
+        """
+
+        root = self.root.resolve()
+        if not root.is_dir():
+            raise RepositoryDeletionError('The configured repository root is unavailable.')
+
+        final_path = self.path_for(dataset_id)
+        staged_path = root / f'.{UUID(str(dataset_id))}.deleting'
+        if final_path.exists() and staged_path.exists():
+            raise RepositoryDeletionError('Repository deletion state is inconsistent.')
+
+        try:
+            if final_path.exists():
+                final_path.rename(staged_path)
+            elif not staged_path.exists():
+                if allow_missing:
+                    return
+                raise RepositoryDeletionError('The dataset repository is unavailable.')
+
+            # The UUID-derived staging name makes an interrupted deletion safe to retry.
+            shutil.rmtree(staged_path)
+        except RepositoryDeletionError:
+            raise
+        except OSError as error:
+            raise RepositoryDeletionError('The dataset repository could not be deleted.') from error

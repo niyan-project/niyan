@@ -9,12 +9,12 @@ from django.test import TestCase, TransactionTestCase
 from accounts.models import User
 from datasets.models import Dataset
 from datasets.repositories import GitRepositoryStore, RepositoryProvisioningError
-from datasets.services import DatasetPathConflict, create_dataset
+from datasets.services import DatasetPathConflict, create_dataset, delete_dataset, update_dataset
 from namespaces.models import Namespace
 
 
-class DatasetCreationTests(TestCase):
-    """Verify dataset records and bare Git repositories are created together."""
+class DatasetServiceTests(TestCase):
+    """Verify dataset records and bare Git repositories remain consistent."""
 
     def setUp(self):
         """Create an owner and personal namespace for each test."""
@@ -68,6 +68,34 @@ class DatasetCreationTests(TestCase):
                 create_dataset(namespace=self.namespace, slug='images', name='Images', created_by=self.user, repository_store=GitRepositoryStore(missing_root))
 
         self.assertFalse(Dataset.objects.exists())
+
+    def test_update_dataset_rechecks_owner_authorization(self):
+        """Protect updates even when a caller bypasses API visibility selection."""
+
+        another_user = User.objects.create_user(username='another-researcher')
+        with TemporaryDirectory() as repository_root:
+            dataset = create_dataset(namespace=self.namespace, slug='images', name='Images', created_by=self.user, repository_store=GitRepositoryStore(repository_root))
+
+            with self.assertRaises(PermissionDenied):
+                update_dataset(dataset=dataset, updated_by=another_user, name='Stolen')
+
+        dataset.refresh_from_db()
+        self.assertEqual(dataset.name, 'Images')
+
+    def test_delete_dataset_rechecks_owner_authorization(self):
+        """Protect permanent deletion when a caller bypasses API selection."""
+
+        another_user = User.objects.create_user(username='another-researcher')
+        with TemporaryDirectory() as repository_root:
+            store = GitRepositoryStore(repository_root)
+            dataset = create_dataset(namespace=self.namespace, slug='images', name='Images', created_by=self.user, repository_store=store)
+
+            with self.assertRaises(PermissionDenied):
+                delete_dataset(dataset=dataset, deleted_by=another_user, repository_store=store)
+
+            self.assertTrue(store.path_for(dataset.id).is_dir())
+
+        self.assertTrue(Dataset.objects.filter(pk=dataset.pk).exists())
 
 
 class DatasetTransactionBoundaryTests(TransactionTestCase):
