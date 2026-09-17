@@ -81,11 +81,13 @@ The service must reject an existing final repository path rather than adopting o
 
 ## Initial API Boundary
 
-The public API must be versioned under `/api/v1/`. Dataset creation accepts an immutable namespace UUID together with the dataset slug and display name. A successful response returns the immutable dataset and namespace UUIDs, current namespace path, slug, display name, and creation timestamp.
+The public API must be versioned under `/api/v1/`. Dataset creation accepts an immutable namespace UUID together with the dataset slug and display name. A successful response returns the immutable dataset and namespace UUIDs, current namespace path, slug, display name, initial default branch, caller's effective role, and creation timestamp.
 
 The endpoint must require an authenticated user and call the domain service rather than performing Git or filesystem work directly. The first implementation may allow creation only in the caller's personal namespace. Group role evaluation, scoped tokens, visibility changes, and protected-ref policy belong to the authorization specification and later stages.
 
 An authenticated user may retrieve a dataset in their personal namespace by immutable dataset UUID. They may also list datasets in their personal namespace by immutable namespace UUID using limit-and-offset pagination. Dataset lists are ordered by creation timestamp and then UUID so repeated requests have a deterministic order. The initial page limit must not exceed 100 datasets.
+
+Path-oriented clients may resolve a visible human-facing namespace path to its immutable UUID through `/api/v1/namespaces/resolve`. The general dataset list may omit `namespace_id` to return a paginated list of every dataset visible to the caller. These lookups apply the same visibility rules as dataset access and never expose inaccessible namespaces or datasets.
 
 An authenticated owner may update a dataset's display name, slug, or both. Changing a slug changes its human-facing path but does not change the dataset UUID or UUID-derived repository location. Empty updates, null values, invalid slugs, and conflicting namespace paths must be rejected.
 

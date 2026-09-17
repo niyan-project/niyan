@@ -123,3 +123,26 @@ def list_visible_namespace_datasets(*, namespace_id, user):
     candidate_datasets = Dataset.objects.select_related('namespace__parent').filter(namespace=namespace, deletion_started_at__isnull=True).order_by('created_at', 'id')
     visible_ids = [dataset.id for dataset in candidate_datasets if can_read_dataset(user=user, dataset=dataset)]
     return candidate_datasets.filter(pk__in=visible_ids)
+
+
+def list_visible_datasets(*, user, boundary_dataset_id=None):
+    """Return every dataset visible to a user in deterministic order.
+
+    Parameters
+    ----------
+    user : accounts.models.User
+        Authenticated user requesting the dataset list.
+    boundary_dataset_id : uuid.UUID, optional
+        Immutable token boundary restricting candidate rows before policy evaluation.
+
+    Returns
+    -------
+    django.db.models.QuerySet
+        Ordered visible datasets with their namespaces loaded.
+    """
+
+    candidate_datasets = Dataset.objects.select_related('namespace__parent').filter(deletion_started_at__isnull=True).order_by('created_at', 'id')
+    if boundary_dataset_id is not None:
+        candidate_datasets = candidate_datasets.filter(pk=boundary_dataset_id)
+    visible_ids = [dataset.id for dataset in candidate_datasets if can_read_dataset(user=user, dataset=dataset)]
+    return candidate_datasets.filter(pk__in=visible_ids)

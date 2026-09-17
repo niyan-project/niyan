@@ -7,7 +7,8 @@ from uuid import uuid4
 from django.test import Client, TestCase, override_settings
 from django.utils.dateparse import parse_datetime
 
-from accounts.models import User
+from accounts.models import AccessToken, User
+from accounts.tokens import create_access_token
 from datasets.models import Dataset
 from datasets.repositories import RepositoryDeletionError
 
@@ -70,6 +71,8 @@ class DatasetApiTests(TestCase):
                 'namespace_path': 'researcher',
                 'slug': 'images',
                 'name': 'Research Images',
+                'default_branch': 'main',
+                'role': 'owner',
             },
         )
         self.assertLess(abs(parse_datetime(body['created_at']) - dataset.created_at), timedelta(milliseconds=1))
@@ -162,6 +165,31 @@ class DatasetApiTests(TestCase):
         self.assertEqual(body['offset'], 1)
         self.assertEqual([item['id'] for item in body['items']], [second_id])
         self.assertNotEqual(first_id, second_id)
+
+    def test_list_datasets_without_namespace_returns_every_visible_dataset(self):
+        """Support the CLI's installation-wide visible dataset listing."""
+
+        first_id = self.post_dataset(slug='first', name='First').json()['id']
+        second_id = self.post_dataset(slug='second', name='Second').json()['id']
+
+        response = self.client.get('/api/v1/datasets')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['id'] for item in response.json()['items']], [first_id, second_id])
+
+    def test_dataset_bound_token_global_list_cannot_expose_other_datasets(self):
+        """Apply a token's immutable dataset boundary before global listing."""
+
+        allowed_id = self.post_dataset(slug='allowed', name='Allowed').json()['id']
+        self.post_dataset(slug='other', name='Other')
+        allowed_dataset = Dataset.objects.get(pk=allowed_id)
+        _, raw_token = create_access_token(user=self.user, name='Bounded reader', scopes=['read_api'], origin=AccessToken.Origin.MANUAL, dataset=allowed_dataset)
+        self.client.logout()
+
+        response = self.client.get('/api/v1/datasets', HTTP_AUTHORIZATION=f'Bearer {raw_token}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['id'] for item in response.json()['items']], [allowed_id])
 
     def test_list_datasets_hides_another_users_namespace(self):
         """Treat an inaccessible namespace as absent during reads."""

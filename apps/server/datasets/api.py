@@ -12,9 +12,10 @@ from pydantic import model_validator
 
 from accounts.authentication import get_access_token, require_access, session_or_access_token
 from accounts.models import AccessToken
-from datasets.repositories import RepositoryDeletionError, RepositoryProvisioningError
 from datasets.models import DatasetGrant
-from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_visible_dataset, get_visible_dataset_by_path, list_visible_namespace_datasets
+from datasets.policies import get_dataset_role
+from datasets.repositories import RepositoryDeletionError, RepositoryProvisioningError
+from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_visible_dataset, get_visible_dataset_by_path, list_visible_datasets, list_visible_namespace_datasets
 from datasets.services import DatasetPathConflict, create_dataset, create_dataset_grant, delete_dataset, delete_dataset_grant, update_dataset, update_dataset_grant
 from namespaces.models import Namespace
 
@@ -35,6 +36,8 @@ class DatasetResponse(Schema):
     namespace_path: str
     slug: str
     name: str
+    default_branch: str
+    role: str
     created_at: datetime
 
 
@@ -146,13 +149,15 @@ class DatasetGrantListResponse(Schema):
 router = Router(tags=['datasets'], auth=session_or_access_token)
 
 
-def serialize_dataset(dataset):
+def serialize_dataset(dataset, *, user):
     """Convert a dataset model into its explicit public representation.
 
     Parameters
     ----------
     dataset : datasets.models.Dataset
         Dataset whose namespace has been loaded.
+    user : accounts.models.User
+        Authenticated user receiving effective access metadata.
 
     Returns
     -------
@@ -166,6 +171,8 @@ def serialize_dataset(dataset):
         'namespace_path': dataset.namespace.path,
         'slug': dataset.slug,
         'name': dataset.name,
+        'default_branch': 'main',
+        'role': get_dataset_role(user=user, dataset=dataset),
         'created_at': dataset.created_at,
     }
 
@@ -231,19 +238,19 @@ def create_dataset_endpoint(request, payload: DatasetCreateInput):
         # Git and filesystem details are deliberately kept behind the repository boundary.
         return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be created.'})
 
-    return Status(201, serialize_dataset(dataset))
+    return Status(201, serialize_dataset(dataset, user=request.auth))
 
 
 @router.get('', response={200: DatasetListResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
-def list_datasets_endpoint(request, namespace_id: UUID, limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0)):
-    """List one page of datasets in a visible personal namespace.
+def list_datasets_endpoint(request, namespace_id: UUID | None = None, limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0)):
+    """List one page of visible datasets, optionally within one namespace.
 
     Parameters
     ----------
     request : django.http.HttpRequest
         Authenticated Django request.
-    namespace_id : uuid.UUID
-        Immutable namespace identity.
+    namespace_id : uuid.UUID, optional
+        Immutable namespace identity used to restrict the result.
     limit : int
         Maximum number of datasets to return.
     offset : int
@@ -258,15 +265,18 @@ def list_datasets_endpoint(request, namespace_id: UUID, limit: int = Query(100, 
     access_token = get_access_token(request)
     boundary_dataset_id = access_token.dataset_id if access_token is not None and access_token.resource_boundary == AccessToken.ResourceBoundary.DATASET else None
     require_access(request=request, scope='read_api', dataset_id=boundary_dataset_id)
-    if boundary_dataset_id is not None and access_token.dataset.namespace_id != namespace_id:
-        raise AuthorizationError
-    datasets = list_visible_namespace_datasets(namespace_id=namespace_id, user=request.auth)
-    if datasets is None:
-        return Status(404, {'code': 'namespace_not_found', 'detail': 'The requested namespace does not exist.'})
     if boundary_dataset_id is not None:
-        datasets = datasets.filter(pk=boundary_dataset_id)
+        if namespace_id is not None and access_token.dataset.namespace_id != namespace_id:
+            raise AuthorizationError
+        datasets = list_visible_datasets(user=request.auth, boundary_dataset_id=boundary_dataset_id)
+    elif namespace_id is not None:
+        datasets = list_visible_namespace_datasets(namespace_id=namespace_id, user=request.auth)
+        if datasets is None:
+            return Status(404, {'code': 'namespace_not_found', 'detail': 'The requested namespace does not exist.'})
+    else:
+        datasets = list_visible_datasets(user=request.auth)
 
-    return Status(200, {'count': datasets.count(), 'limit': limit, 'offset': offset, 'items': [serialize_dataset(dataset) for dataset in datasets[offset : offset + limit]]})
+    return Status(200, {'count': datasets.count(), 'limit': limit, 'offset': offset, 'items': [serialize_dataset(dataset, user=request.auth) for dataset in datasets[offset : offset + limit]]})
 
 
 @router.get('/resolve', response={200: DatasetRepositoryLocationResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
@@ -302,7 +312,7 @@ def get_dataset_endpoint(request, dataset_id: UUID):
     dataset = get_visible_dataset(dataset_id=dataset_id, user=request.auth)
     if dataset is None:
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
-    return Status(200, serialize_dataset(dataset))
+    return Status(200, serialize_dataset(dataset, user=request.auth))
 
 
 @router.patch('/{dataset_id}', response={200: DatasetResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse})
@@ -339,7 +349,7 @@ def update_dataset_endpoint(request, dataset_id: UUID, payload: DatasetUpdateInp
     except ValidationError:
         return Status(422, {'code': 'validation_error', 'detail': 'The dataset details are invalid.'})
 
-    return Status(200, serialize_dataset(dataset))
+    return Status(200, serialize_dataset(dataset, user=request.auth))
 
 
 @router.delete('/{dataset_id}', response={204: None, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse})
