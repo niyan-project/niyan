@@ -1,5 +1,6 @@
 import io
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -9,10 +10,11 @@ from unittest.mock import patch
 
 from niyan.auth import authentication_status, login, login_with_token, logout, resolve_host, select_credential
 from niyan.cli import _read_access_token, build_parser, main
-from niyan.config import AppPaths, Configuration, CredentialBinding, find_local_config
+from niyan.config import AppPaths, CheckoutIdentity, Configuration, CredentialBinding, find_local_config
 from niyan.credentials import CredentialStores, InsecureFileCredentialStore
-from niyan.errors import ApiError, ConfigurationError, CredentialError
-from niyan.git import clone_dataset, credential_helper
+from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
+from niyan.errors import ApiError, ConfigurationError, CredentialError, GitError
+from niyan.git import clone_dataset, credential_helper, load_checkout_identity
 from niyan.http import normalize_host
 
 
@@ -151,6 +153,87 @@ class FakeLifecycleApi:
         return 204, {}
 
 
+class FakeDatasetApi:
+    """Simulate dataset forge endpoints through the public client boundary."""
+
+    calls = []
+    deleted = []
+
+    def __init__(self, host, token=None):
+        """Remember the host and bearer token selected by the command."""
+
+        self.host = host
+        self.token = token
+
+    def resolve_namespace(self, namespace_path):
+        """Resolve the one namespace used by command tests."""
+
+        type(self).calls.append(('resolve_namespace', namespace_path, self.token))
+        return 200, {'id': '11111111-1111-1111-1111-111111111111', 'path': namespace_path, 'name': 'Researcher', 'kind': 'personal'}
+
+    def create_dataset(self, *, namespace_id, slug, name):
+        """Return one created dataset representation."""
+
+        type(self).calls.append(('create_dataset', namespace_id, slug, name))
+        return 201, self._dataset(slug=slug, name=name)
+
+    def list_datasets(self, *, namespace_id=None, limit=100, offset=0):
+        """Return a deterministic visible dataset page."""
+
+        type(self).calls.append(('list_datasets', namespace_id, limit, offset))
+        return 200, {'count': 1, 'limit': limit, 'offset': offset, 'items': [self._dataset()]}
+
+    def resolve_dataset(self, dataset_path):
+        """Resolve mutable input to the test dataset UUID."""
+
+        type(self).calls.append(('resolve_dataset', dataset_path, self.token))
+        return 200, {
+            'id': '22222222-2222-2222-2222-222222222222',
+            'path': 'researcher/images',
+            'name': 'Research Images',
+            'git_url': 'https://niyan.example/git/22222222-2222-2222-2222-222222222222.git',
+        }
+
+    def get_dataset(self, dataset_id):
+        """Return current dataset metadata."""
+
+        type(self).calls.append(('get_dataset', dataset_id))
+        return 200, self._dataset()
+
+    def update_dataset(self, dataset_id, *, slug=None, name=None):
+        """Return the requested mutable values in the updated representation."""
+
+        type(self).calls.append(('update_dataset', dataset_id, slug, name))
+        return 200, self._dataset(slug=slug or 'images', name=name or 'Research Images')
+
+    def delete_dataset(self, dataset_id):
+        """Record permanent deletion."""
+
+        type(self).deleted.append(dataset_id)
+        return 204, {}
+
+    def get_repository_readme(self, dataset_id, *, revision='main'):
+        """Return a small README summary."""
+
+        type(self).calls.append(('get_repository_readme', dataset_id, revision))
+        return 200, {'content': '# Research Images\n\nExample dataset.'}
+
+    @staticmethod
+    def _dataset(*, slug='images', name='Research Images'):
+        """Build one complete dataset API representation."""
+
+        return {
+            'id': '22222222-2222-2222-2222-222222222222',
+            'namespace_id': '11111111-1111-1111-1111-111111111111',
+            'namespace_path': 'researcher',
+            'slug': slug,
+            'name': name,
+            'default_branch': 'main',
+            'role': 'owner',
+            'created_at': '2026-09-17T00:00:00Z',
+        }
+
+
 class CliStateTests(unittest.TestCase):
     """Verify global, local, secure, and explicit insecure state handling."""
 
@@ -268,6 +351,34 @@ class CliStateTests(unittest.TestCase):
 
         self.assertEqual(selected.token, 'dataset-secret')
         self.assertEqual(selected.source, 'user')
+
+    def test_immutable_dataset_identity_finds_binding_after_path_rename(self):
+        """Select a dataset token by UUID when its configured path is stale."""
+
+        binding = CredentialBinding(
+            token_id='55555555-5555-5555-5555-555555555555',
+            username='dataset-user',
+            storage='keyring',
+            dataset_id='dddddddd-dddd-dddd-dddd-dddddddddddd',
+            dataset_path='researcher/old-images',
+            resource_boundary='dataset',
+        )
+        configuration = Configuration()
+        configuration.set_binding(host='https://niyan.example', binding=binding)
+        configuration.save(self.paths.global_config)
+        self.stores.keyring.set(host='https://niyan.example', token_id=binding.token_id, token='renamed-dataset-secret')
+
+        selected = select_credential(
+            host='https://niyan.example',
+            dataset_path='researcher/images',
+            dataset_id='dddddddd-dddd-dddd-dddd-dddddddddddd',
+            paths=self.paths,
+            stores=self.stores,
+            cwd=self.root,
+        )
+
+        self.assertEqual(selected.token, 'renamed-dataset-secret')
+        self.assertEqual(selected.binding, binding)
 
     def test_missing_exact_credential_does_not_fall_back_to_broader_token(self):
         """Report a broken narrow binding instead of silently widening access."""
@@ -614,6 +725,169 @@ class CliAuthenticationCommandTests(unittest.TestCase):
         self.assertTrue(logout_call.call_args.kwargs['forget'])
 
 
+class CliDatasetForgeTests(unittest.TestCase):
+    """Verify path-oriented remote dataset management workflows."""
+
+    def setUp(self):
+        """Create isolated configuration with one user-level credential."""
+
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.paths = AppPaths(config_home=self.root / 'config', data_home=self.root / 'data')
+        self.keyring = FakeKeyring()
+        self.stores = CredentialStores(paths=self.paths, keyring_module=self.keyring)
+        self.binding = CredentialBinding(token_id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', username='researcher', storage='keyring')
+        configuration = Configuration(default_host='https://niyan.example')
+        configuration.set_binding(host='https://niyan.example', binding=self.binding)
+        configuration.save(self.paths.global_config)
+        self.stores.keyring.set(host='https://niyan.example', token_id=self.binding.token_id, token='niyan_selector_secret')
+
+    def tearDown(self):
+        """Remove isolated CLI state and fake API history."""
+
+        self.temporary_directory.cleanup()
+        FakeDatasetApi.calls = []
+        FakeDatasetApi.deleted = []
+
+    def test_create_resolves_namespace_and_prints_canonical_identity(self):
+        """Keep human paths at the CLI boundary and UUIDs at the API boundary."""
+
+        output = io.StringIO()
+
+        dataset = create_remote_dataset(
+            host='https://niyan.example',
+            dataset_path='researcher/images',
+            name='Research Images',
+            clone=False,
+            paths=self.paths,
+            stores=self.stores,
+            cwd=self.root,
+            api_factory=FakeDatasetApi,
+            stdout=output,
+        )
+
+        self.assertEqual(dataset['id'], '22222222-2222-2222-2222-222222222222')
+        self.assertIn(('resolve_namespace', 'researcher', 'niyan_selector_secret'), FakeDatasetApi.calls)
+        self.assertIn(('create_dataset', '11111111-1111-1111-1111-111111111111', 'images', 'Research Images'), FakeDatasetApi.calls)
+        self.assertEqual(output.getvalue(), 'Created researcher/images (22222222-2222-2222-2222-222222222222)\n')
+
+    def test_list_supports_all_visible_or_one_namespace(self):
+        """Resolve optional namespace filters without exposing UUID arguments."""
+
+        all_output = io.StringIO()
+        namespace_output = io.StringIO()
+
+        list_remote_datasets(host='https://niyan.example', namespace_path=None, limit=20, paths=self.paths, stores=self.stores, cwd=self.root, api_factory=FakeDatasetApi, stdout=all_output)
+        list_remote_datasets(host='https://niyan.example', namespace_path='researcher', limit=10, paths=self.paths, stores=self.stores, cwd=self.root, api_factory=FakeDatasetApi, stdout=namespace_output)
+
+        self.assertEqual(all_output.getvalue(), 'researcher/images\towner\tResearch Images\n')
+        self.assertEqual(namespace_output.getvalue(), all_output.getvalue())
+        self.assertIn(('list_datasets', None, 20, 0), FakeDatasetApi.calls)
+        self.assertIn(('list_datasets', '11111111-1111-1111-1111-111111111111', 10, 0), FakeDatasetApi.calls)
+
+    def test_view_prints_access_metadata_and_readme(self):
+        """Render the server's effective role and repository README."""
+
+        output = io.StringIO()
+
+        view_remote_dataset(host='https://niyan.example', dataset_path='researcher/images', web=False, paths=self.paths, stores=self.stores, cwd=self.root, api_factory=FakeDatasetApi, stdout=output)
+
+        rendered = output.getvalue()
+        self.assertIn('ID: 22222222-2222-2222-2222-222222222222', rendered)
+        self.assertIn('Default branch: main', rendered)
+        self.assertIn('Access: owner', rendered)
+        self.assertIn('# Research Images', rendered)
+
+    def test_view_infers_immutable_checkout_identity_after_remote_rename(self):
+        """Avoid depending on a stale mutable path inside an existing checkout."""
+
+        checkout = self.root / 'checkout'
+        subprocess.run(['git', 'init', '--initial-branch=main', str(checkout)], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(checkout), 'remote', 'add', 'origin', 'https://niyan.example/git/22222222-2222-2222-2222-222222222222.git'], check=True)
+        checkout_configuration = Configuration(default_host='https://niyan.example')
+        checkout_configuration.set_checkout(
+            CheckoutIdentity(
+                host='https://niyan.example',
+                dataset_id='22222222-2222-2222-2222-222222222222',
+                dataset_path='researcher/old-images',
+            )
+        )
+        checkout_configuration.save(find_local_config(checkout, required=True))
+
+        view_remote_dataset(host='https://niyan.example', dataset_path=None, web=False, paths=self.paths, stores=self.stores, cwd=checkout, api_factory=FakeDatasetApi, stdin=io.StringIO(), stdout=io.StringIO())
+
+        self.assertFalse(any(call[0] == 'resolve_dataset' for call in FakeDatasetApi.calls))
+        self.assertEqual(Configuration.load(find_local_config(checkout, required=True)).checkout.dataset_path, 'researcher/images')
+
+    def test_edit_updates_only_explicit_fields(self):
+        """Send a partial metadata update after resolving the dataset path."""
+
+        output = io.StringIO()
+
+        dataset = edit_remote_dataset(
+            host='https://niyan.example',
+            dataset_path='researcher/images',
+            slug='microscopy',
+            name=None,
+            paths=self.paths,
+            stores=self.stores,
+            cwd=self.root,
+            api_factory=FakeDatasetApi,
+            stdout=output,
+        )
+
+        self.assertEqual(dataset['slug'], 'microscopy')
+        self.assertIn(('update_dataset', '22222222-2222-2222-2222-222222222222', 'microscopy', None), FakeDatasetApi.calls)
+        self.assertIn('Updated researcher/microscopy', output.getvalue())
+
+    def test_delete_requires_exact_non_interactive_confirmation(self):
+        """Reject generic confirmation before invoking irreversible deletion."""
+
+        with self.assertRaises(ConfigurationError):
+            delete_remote_dataset(
+                host='https://niyan.example',
+                dataset_path='researcher/images',
+                confirmation='yes',
+                paths=self.paths,
+                stores=self.stores,
+                cwd=self.root,
+                api_factory=FakeDatasetApi,
+                stdin=io.StringIO(),
+                stdout=io.StringIO(),
+            )
+        self.assertEqual(FakeDatasetApi.deleted, [])
+
+        output = io.StringIO()
+        delete_remote_dataset(
+            host='https://niyan.example',
+            dataset_path='researcher/images',
+            confirmation='researcher/images',
+            paths=self.paths,
+            stores=self.stores,
+            cwd=self.root,
+            api_factory=FakeDatasetApi,
+            stdin=io.StringIO(),
+            stdout=output,
+        )
+
+        self.assertEqual(FakeDatasetApi.deleted, ['22222222-2222-2222-2222-222222222222'])
+        self.assertEqual(output.getvalue(), 'Deleted researcher/images\n')
+
+    def test_dataset_command_grammar_exposes_crud_options(self):
+        """Keep the public parser aligned with the accepted forge surface."""
+
+        create_arguments = build_parser().parse_args(['dataset', 'create', 'researcher/images', '--name', 'Images', '--clone', '--full-history'])
+        clone_arguments = build_parser().parse_args(['dataset', 'clone', 'researcher/images', '--full-history'])
+        edit_arguments = build_parser().parse_args(['dataset', 'edit', 'researcher/images', '--slug', 'microscopy'])
+        delete_arguments = build_parser().parse_args(['dataset', 'delete', 'researcher/images', '--confirm', 'researcher/images'])
+
+        self.assertTrue(create_arguments.clone)
+        self.assertTrue(create_arguments.full_history)
+        self.assertTrue(clone_arguments.full_history)
+        self.assertEqual(edit_arguments.slug, 'microscopy')
+        self.assertEqual(delete_arguments.confirm, 'researcher/images')
+
+
 class CliGitTests(unittest.TestCase):
     """Verify credential-helper isolation and Git clone orchestration."""
 
@@ -673,7 +947,7 @@ class CliGitTests(unittest.TestCase):
                 }
 
         completed = subprocess.CompletedProcess(args=[], returncode=0)
-        with patch('niyan.git.shutil.which', return_value='/usr/bin/git'), patch('niyan.git.subprocess.run', return_value=completed) as run:
+        with patch('niyan.git.shutil.which', return_value='/usr/bin/git'), patch('niyan.git.subprocess.run', return_value=completed) as run, patch('niyan.git._save_checkout_identity') as save_identity:
             destination = clone_dataset(
                 host='https://niyan.example',
                 dataset_path='researcher/images',
@@ -693,6 +967,104 @@ class CliGitTests(unittest.TestCase):
         self.assertNotIn('niyan_environment_secret', repr(command))
         self.assertNotIn('NIYAN_TOKEN', child_environment)
         self.assertIn('credential.helper=', command[2])
+        self.assertIn('--depth=1', command)
+        self.assertIn('--single-branch', command)
+        self.assertIn('--no-tags', command)
+        self.assertEqual(save_identity.call_args.args[0], self.root / 'checkout')
+
+    def test_full_history_clone_omits_shallow_fetch_options(self):
+        """Allow the exceptional complete-history clone explicitly."""
+
+        class CloneApi:
+            """Return one same-origin repository location."""
+
+            def __init__(self, host, token=None):
+                self.host = host
+                self.token = token
+
+            def resolve_dataset(self, dataset_path):
+                return 200, {
+                    'id': 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+                    'path': 'researcher/images',
+                    'name': 'Images',
+                    'git_url': 'https://niyan.example/git/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.git',
+                }
+
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+        with patch('niyan.git.shutil.which', return_value='/usr/bin/git'), patch('niyan.git.subprocess.run', return_value=completed) as run, patch('niyan.git._save_checkout_identity') as save_identity:
+            clone_dataset(
+                host='https://niyan.example',
+                dataset_path='researcher/images',
+                destination='checkout',
+                paths=self.paths,
+                stores=self.stores,
+                full_history=True,
+                cwd=self.root,
+                environment={'NIYAN_TOKEN': 'niyan_environment_secret', 'PATH': os.environ.get('PATH', '')},
+                api_factory=CloneApi,
+                stderr=io.StringIO(),
+            )
+
+        command = run.call_args.args[0]
+        self.assertNotIn('--depth=1', command)
+        self.assertNotIn('--single-branch', command)
+        self.assertNotIn('--no-tags', command)
+        self.assertEqual(save_identity.call_args.args[1].history, 'full')
+
+
+class CheckoutIdentityTests(unittest.TestCase):
+    """Verify checkout identity remains portable and detects remote drift."""
+
+    def setUp(self):
+        """Create a real Git checkout with matching Niyān metadata."""
+
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.checkout = self.root / 'checkout'
+        subprocess.run(['git', 'init', '--initial-branch=main', str(self.checkout)], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.checkout), 'remote', 'add', 'origin', 'https://niyan.example/git/22222222-2222-2222-2222-222222222222.git'], check=True)
+        configuration = Configuration()
+        configuration.set_checkout(
+            CheckoutIdentity(
+                host='https://niyan.example',
+                dataset_id='22222222-2222-2222-2222-222222222222',
+                dataset_path='researcher/images',
+            )
+        )
+        configuration.save(find_local_config(self.checkout, required=True))
+
+    def tearDown(self):
+        """Remove the isolated checkout."""
+
+        self.temporary_directory.cleanup()
+
+    def test_checkout_identity_survives_worktree_move(self):
+        """Discover identity through Git instead of an absolute worktree path."""
+
+        moved_checkout = self.root / 'moved-checkout'
+        shutil.move(self.checkout, moved_checkout)
+
+        identity = load_checkout_identity(moved_checkout)
+
+        self.assertEqual(identity.dataset_id, '22222222-2222-2222-2222-222222222222')
+        self.assertEqual(identity.dataset_path, 'researcher/images')
+
+    def test_mismatched_remote_is_rejected(self):
+        """Do not apply one dataset identity to another Git remote."""
+
+        subprocess.run(['git', '-C', str(self.checkout), 'remote', 'set-url', 'origin', 'https://niyan.example/git/33333333-3333-3333-3333-333333333333.git'], check=True)
+
+        with self.assertRaisesRegex(GitError, 'does not match'):
+            load_checkout_identity(self.checkout)
+
+    def test_malformed_checkout_metadata_is_rejected(self):
+        """Fail safely instead of guessing around corrupt local identity."""
+
+        config_path = find_local_config(self.checkout, required=True)
+        config_path.write_text('{"version": 1, "hosts": {}, "checkout": {"host": "https://niyan.example", "dataset_id": "not-a-uuid", "dataset_path": "researcher/images"}}')
+
+        with self.assertRaises(ConfigurationError):
+            load_checkout_identity(self.checkout)
 
 
 class HostValidationTests(unittest.TestCase):

@@ -294,7 +294,7 @@ def logout(*, host, paths, stores, local=False, dataset_path=None, forget=False,
     return binding
 
 
-def select_credential(*, host, dataset_path, paths, stores, cwd=None, environment=None):
+def select_credential(*, host, dataset_path, dataset_id=None, paths, stores, cwd=None, environment=None):
     """Select local, global, or explicit environment credentials.
 
     Parameters
@@ -303,6 +303,8 @@ def select_credential(*, host, dataset_path, paths, stores, cwd=None, environmen
         Normalized installation origin.
     dataset_path : str or None
         Dataset path targeted by the operation.
+    dataset_id : str, optional
+        Immutable checkout identity used to find a renamed dataset binding.
     paths : niyan.config.AppPaths
         User configuration locations.
     stores : niyan.credentials.CredentialStores
@@ -332,8 +334,8 @@ def select_credential(*, host, dataset_path, paths, stores, cwd=None, environmen
     if normalized_dataset_path is not None:
         candidates.extend(
             (
-                ('local', local_configuration.select_binding(host=host, dataset_path=normalized_dataset_path, include_default=False)),
-                ('user', global_configuration.select_binding(host=host, dataset_path=normalized_dataset_path, include_default=False)),
+                ('local', local_configuration.select_binding(host=host, dataset_path=normalized_dataset_path, dataset_id=dataset_id, include_default=False)),
+                ('user', global_configuration.select_binding(host=host, dataset_path=normalized_dataset_path, dataset_id=dataset_id, include_default=False)),
             )
         )
     candidates.extend(

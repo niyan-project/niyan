@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import tempfile
+from uuid import UUID
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -139,12 +140,72 @@ class CredentialBinding:
         return encoded
 
 
+@dataclass(frozen=True)
+class CheckoutIdentity:
+    """Identify one Niyān dataset checkout without storing credentials."""
+
+    host: str
+    dataset_id: str
+    dataset_path: str
+    remote: str = 'origin'
+    history: str = 'shallow'
+
+    @classmethod
+    def from_dict(cls, value):
+        """Validate and deserialize checkout identity metadata.
+
+        Parameters
+        ----------
+        value : dict
+            JSON-decoded checkout identity.
+
+        Returns
+        -------
+        CheckoutIdentity
+            Validated immutable checkout identity.
+
+        Raises
+        ------
+        ConfigurationError
+            If required identity or history fields are malformed.
+        """
+
+        if not isinstance(value, dict) or not all(isinstance(value.get(field_name), str) for field_name in ('host', 'dataset_id', 'dataset_path')):
+            raise ConfigurationError('Niyān checkout identity is invalid.')
+        try:
+            dataset_id = str(UUID(value['dataset_id']))
+        except ValueError as error:
+            raise ConfigurationError('Niyān checkout dataset identity is invalid.') from error
+        remote = value.get('remote', 'origin')
+        history = value.get('history', 'shallow')
+        if not isinstance(remote, str) or not remote or any(character.isspace() for character in remote):
+            raise ConfigurationError('Niyān checkout remote is invalid.')
+        if history not in ('shallow', 'full'):
+            raise ConfigurationError('Niyān checkout history policy is invalid.')
+        host = value['host'].strip().rstrip('/')
+        if not host.startswith(('https://', 'http://')):
+            raise ConfigurationError('Niyān checkout host is invalid.')
+        return cls(host=host, dataset_id=dataset_id, dataset_path=normalize_dataset_path(value['dataset_path']), remote=remote, history=history)
+
+    def to_dict(self):
+        """Return checkout identity fields suitable for local configuration.
+
+        Returns
+        -------
+        dict
+            JSON-safe checkout identity representation.
+        """
+
+        return asdict(self)
+
+
 @dataclass
 class Configuration:
     """Store host and token bindings while excluding credential secrets."""
 
     default_host: str | None = None
     hosts: dict = field(default_factory=dict)
+    checkout: CheckoutIdentity | None = None
 
     @classmethod
     def load(cls, path):
@@ -169,7 +230,9 @@ class Configuration:
             raise ConfigurationError(f'Could not read Niyān configuration at {path}.') from error
         if not isinstance(payload, dict) or payload.get('version') != 1 or not isinstance(payload.get('hosts', {}), dict):
             raise ConfigurationError(f'Niyān configuration at {path} has an unsupported format.')
-        return cls(default_host=payload.get('default_host'), hosts=payload.get('hosts', {}))
+        encoded_checkout = payload.get('checkout')
+        checkout = CheckoutIdentity.from_dict(encoded_checkout) if encoded_checkout is not None else None
+        return cls(default_host=payload.get('default_host'), hosts=payload.get('hosts', {}), checkout=checkout)
 
     def save(self, path):
         """Atomically persist non-secret configuration with private permissions.
@@ -182,6 +245,8 @@ class Configuration:
 
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         payload = {'version': 1, 'default_host': self.default_host, 'hosts': self.hosts}
+        if self.checkout is not None:
+            payload['checkout'] = self.checkout.to_dict()
         temporary_path = None
         try:
             with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=path.parent, prefix=f'.{path.name}.', delete=False) as temporary:
@@ -213,7 +278,19 @@ class Configuration:
         else:
             host_config['default'] = binding.to_dict()
 
-    def select_binding(self, *, host, dataset_path=None, include_default=True):
+    def set_checkout(self, checkout):
+        """Set checkout identity while making its host locally discoverable.
+
+        Parameters
+        ----------
+        checkout : CheckoutIdentity
+            Non-secret immutable dataset identity and checkout policy.
+        """
+
+        self.checkout = checkout
+        self.default_host = checkout.host
+
+    def select_binding(self, *, host, dataset_path=None, dataset_id=None, include_default=True):
         """Select an exact dataset binding before the host default.
 
         Parameters
@@ -222,6 +299,8 @@ class Configuration:
             Normalized installation origin.
         dataset_path : str, optional
             Human-facing dataset path.
+        dataset_id : str, optional
+            Immutable dataset identity used when a checkout path became stale.
         include_default : bool, optional
             Return the host default when no exact dataset binding exists.
 
@@ -234,8 +313,18 @@ class Configuration:
         host_config = self.hosts.get(host)
         if not isinstance(host_config, dict):
             return None
+        datasets = host_config.get('datasets', {})
+        if dataset_id and isinstance(datasets, dict):
+            try:
+                normalized_id = str(UUID(dataset_id))
+            except ValueError as error:
+                raise ConfigurationError('Niyān credential dataset identity is invalid.') from error
+            for encoded_binding in datasets.values():
+                binding = CredentialBinding.from_dict(encoded_binding)
+                if binding.dataset_id == normalized_id:
+                    return binding
         if dataset_path:
-            encoded_binding = host_config.get('datasets', {}).get(dataset_path)
+            encoded_binding = datasets.get(dataset_path) if isinstance(datasets, dict) else None
             if encoded_binding is not None:
                 return CredentialBinding.from_dict(encoded_binding)
         if not include_default:

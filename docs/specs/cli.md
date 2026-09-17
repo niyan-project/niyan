@@ -131,8 +131,8 @@ The remote dataset management surface is:
 ```text
 niyan dataset create [<namespace/dataset>]
 niyan dataset create <namespace/dataset> --source <directory>
-niyan dataset create <namespace/dataset> --clone
-niyan dataset clone <namespace/dataset> [<directory>]
+niyan dataset create <namespace/dataset> --clone [--full-history]
+niyan dataset clone <namespace/dataset> [<directory>] [--full-history]
 niyan dataset list [<namespace>]
 niyan dataset view [<namespace/dataset>] [--web]
 niyan dataset edit [<namespace/dataset>]
@@ -141,7 +141,13 @@ niyan dataset delete [<namespace/dataset>]
 
 `dataset create` creates an empty remote dataset. With no path, an interactive terminal may prompt for the namespace, slug, and display name. `--clone` immediately creates its local checkout. `--source` turns an existing directory into the initial dataset working copy, applies the accepted LFS tracking policy, creates an initial commit after showing the planned changes, and pushes it. It must refuse a source directory whose existing Git state would be overwritten or ambiguously repurposed.
 
-`dataset clone` resolves the mutable path to an immutable UUID, invokes Git smart HTTP with a temporary Niyān credential helper, and configures checkout-private Niyān metadata. It must not place credentials in the URL, command arguments, child environment, `.git/config`, or `.gitmodules`.
+`dataset clone` resolves the mutable path to an immutable UUID, invokes Git smart HTTP with a temporary Niyān credential helper, and configures checkout-private Niyān metadata. The metadata records the installation host, immutable dataset UUID, last-known canonical path, remote name, and history policy beneath the checkout's private Git directory. It must not place credentials in the URL, command arguments, child environment, `.git/config`, or `.gitmodules`. Commands inside the checkout resolve the dataset by UUID, verify that the configured remote still targets that UUID on the recorded host, and refresh a stale canonical path after a server-side rename.
+
+Dataset clones are shallow, single-branch, depth-one clones without tags by default. `--full-history` requests ordinary complete Git history and remote refs for the exceptional workflow that needs them. Later fetch and pull operations preserve the checkout's shallow history policy unless the user explicitly requests full history. Fetching another branch may retain commits required by local branches, commits, stashes, or unpushed work; Niyān must never discard local-only state merely to reduce disk usage.
+
+Depth limits reachable Git history rather than guaranteeing that every older Git object is immediately absent from disk. Normal safe Git maintenance may eventually reclaim unreachable objects, but Niyān must not force-prune ordinary Git objects merely to simulate a one-version cache.
+
+Shallow Git history and local Git LFS storage are separate concerns. The default LFS workflow materializes the selected working set for the checked-out commit and may reclaim older local LFS objects only after protecting the current checkout, stashes, other worktrees, and unpushed content and verifying reachable deletion candidates against the remote. The checkout metadata records this policy, but automatic LFS materialization and reclamation begin with the LFS transfer stage.
 
 `dataset list` returns only datasets currently visible to the user. `dataset view` prints identity, namespace, default branch, access role, and README summary; `--web` opens the corresponding web page. `dataset edit` changes supported mutable metadata such as display name and slug.
 
@@ -224,11 +230,11 @@ Repository synchronization uses:
 
 ```text
 niyan fetch
-niyan pull
+niyan pull [--full-history]
 niyan push
 ```
 
-`fetch` updates remote Git refs and metadata without modifying the working tree or downloading LFS objects by default. `pull` fetches and performs a fast-forward update of the current branch, then materializes the configured LFS working set. A divergent branch is reported rather than silently selecting merge or rebase; the user may run `niyan merge` explicitly.
+`fetch` updates remote Git refs and metadata without modifying the working tree or downloading LFS objects by default. `pull` fetches and performs a fast-forward update of the current branch, then materializes the configured LFS working set. In a shallow checkout it keeps the current branch at depth one by default; `--full-history` converts the checkout to complete history. A divergent branch is reported rather than silently selecting merge or rebase; the user may run `niyan merge` explicitly.
 
 `push` uploads required LFS objects, completes server-required verification, and only then proposes Git ref updates. A failed object upload or verification must prevent the corresponding ref update from becoming visible. Pushes use expected-old-object concurrency and report non-fast-forward rejection without silently overwriting remote work.
 

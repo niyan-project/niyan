@@ -7,6 +7,7 @@ from niyan import __version__
 from niyan.auth import authentication_status, login, login_with_token, logout, resolve_host
 from niyan.config import AppPaths
 from niyan.credentials import CredentialStores
+from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
 from niyan.errors import ApiError, ConfigurationError, CredentialError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper
 
@@ -41,10 +42,34 @@ def build_parser():
 
     dataset_parser = commands.add_parser('dataset', help='Work with dataset repositories.')
     dataset_commands = dataset_parser.add_subparsers(dest='dataset_command', required=True)
+    create_parser = dataset_commands.add_parser('create', help='Create an empty remote dataset.')
+    create_parser.add_argument('dataset_path', nargs='?', help='Dataset path in namespace/dataset form. Prompts when omitted in a terminal.')
+    create_parser.add_argument('--name', help='Dataset display name. Defaults to the slug.')
+    create_parser.add_argument('--clone', action='store_true', help='Clone the empty dataset after creation.')
+    create_parser.add_argument('--full-history', action='store_true', help='With --clone, fetch complete history instead of the shallow default.')
+    create_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
     clone_parser = dataset_commands.add_parser('clone', help='Clone a dataset through Niyān-managed Git authentication.')
     clone_parser.add_argument('dataset_path', help='Dataset path in namespace/dataset form.')
     clone_parser.add_argument('destination', nargs='?', help='Checkout destination. Defaults to the dataset slug.')
+    clone_parser.add_argument('--full-history', action='store_true', help='Fetch complete history and remote branches instead of the shallow default.')
     clone_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+    list_parser = dataset_commands.add_parser('list', help='List datasets visible to the current user.')
+    list_parser.add_argument('namespace', nargs='?', help='Optional root or nested namespace path.')
+    list_parser.add_argument('--limit', type=int, default=100, choices=range(1, 101), metavar='1..100', help='Maximum datasets to return. Defaults to 100.')
+    list_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+    view_parser = dataset_commands.add_parser('view', help='Show remote dataset metadata and README content.')
+    view_parser.add_argument('dataset_path', nargs='?', help='Dataset path in namespace/dataset form. Prompts when omitted in a terminal.')
+    view_parser.add_argument('--web', action='store_true', help='Open the dataset in the web application.')
+    view_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+    edit_parser = dataset_commands.add_parser('edit', help='Change a remote dataset slug or display name.')
+    edit_parser.add_argument('dataset_path', nargs='?', help='Dataset path in namespace/dataset form. Prompts when omitted in a terminal.')
+    edit_parser.add_argument('--slug', help='Replacement dataset path slug.')
+    edit_parser.add_argument('--name', help='Replacement dataset display name.')
+    edit_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+    delete_parser = dataset_commands.add_parser('delete', help='Permanently delete a remote dataset and its repository.')
+    delete_parser.add_argument('dataset_path', nargs='?', help='Dataset path in namespace/dataset form. Prompts when omitted in a terminal.')
+    delete_parser.add_argument('--confirm', help='Exact dataset path required for non-interactive deletion.')
+    delete_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
 
     return parser
 
@@ -151,8 +176,40 @@ def main(argv=None):
                 destination=arguments.destination,
                 paths=paths,
                 stores=stores,
+                full_history=arguments.full_history,
                 cwd=Path.cwd(),
             )
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'create':
+            if arguments.full_history and not arguments.clone:
+                parser.error('--full-history requires --clone when creating a dataset.')
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            create_remote_dataset(
+                host=host,
+                dataset_path=arguments.dataset_path,
+                name=arguments.name,
+                clone=arguments.clone,
+                full_history=arguments.full_history,
+                paths=paths,
+                stores=stores,
+                cwd=Path.cwd(),
+            )
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'list':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            list_remote_datasets(host=host, namespace_path=arguments.namespace, limit=arguments.limit, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'view':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            view_remote_dataset(host=host, dataset_path=arguments.dataset_path, web=arguments.web, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'edit':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            edit_remote_dataset(host=host, dataset_path=arguments.dataset_path, slug=arguments.slug, name=arguments.name, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'delete':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            delete_remote_dataset(host=host, dataset_path=arguments.dataset_path, confirmation=arguments.confirm, paths=paths, stores=stores, cwd=Path.cwd())
             return 0
         parser.error('Unsupported command.')
     except NiyanCliError as error:
@@ -193,10 +250,18 @@ def _error_exit_status(error):
     if isinstance(error, CredentialError):
         return 3
     if isinstance(error, ApiError):
+        if error.status in (400, 422):
+            return 2
         if error.status == 401:
             return 3
         if error.status == 403:
             return 4
+        if error.status == 404:
+            return 5
+        if error.status == 409:
+            return 6
+        if error.status in (429, 500, 502, 503, 504):
+            return 7
         if error.status is None:
             return 7
     if isinstance(error, ConfigurationError):

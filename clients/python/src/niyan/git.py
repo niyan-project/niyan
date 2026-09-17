@@ -8,11 +8,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from niyan.auth import select_credential
+from niyan.config import CheckoutIdentity, Configuration, find_local_config
 from niyan.errors import CredentialError, GitError
 from niyan.http import ApiClient
 
 
-def clone_dataset(*, host, dataset_path, destination, paths, stores, cwd=None, environment=None, api_factory=ApiClient, stderr=None):
+def clone_dataset(*, host, dataset_path, destination, paths, stores, full_history=False, cwd=None, environment=None, api_factory=ApiClient, stderr=None):
     """Resolve and clone one dataset through Niyān-managed Git credentials.
 
     Parameters
@@ -27,6 +28,8 @@ def clone_dataset(*, host, dataset_path, destination, paths, stores, cwd=None, e
         CLI configuration and data paths.
     stores : niyan.credentials.CredentialStores
         Credential storage adapters.
+    full_history : bool, optional
+        Clone all reachable history and remote branches instead of the shallow default.
     cwd : pathlib.Path, optional
         Working directory for local credential selection and Git.
     environment : mapping, optional
@@ -72,10 +75,10 @@ def clone_dataset(*, host, dataset_path, destination, paths, stores, cwd=None, e
         '-c',
         'credential.useHttpPath=true',
         'clone',
-        '--',
-        git_url,
-        str(destination_path),
     ]
+    if not full_history:
+        command.extend(['--depth=1', '--single-branch', '--no-tags'])
+    command.extend(['--', git_url, str(destination_path)])
     child_environment = dict(environment if environment is not None else os.environ)
     child_environment.pop('NIYAN_TOKEN', None)
     # LFS transfer is a later protocol slice. Prevent an installed Git LFS filter from making unauthenticated transfer attempts during this metadata-only clone.
@@ -89,8 +92,96 @@ def clone_dataset(*, host, dataset_path, destination, paths, stores, cwd=None, e
             temporary_secret.unlink(missing_ok=True)
     if result.returncode != 0:
         raise GitError('Git could not clone the requested dataset.')
+    _save_checkout_identity(
+        destination_path,
+        CheckoutIdentity(host=host, dataset_id=dataset_id, dataset_path=canonical_path, history='full' if full_history else 'shallow'),
+    )
     print('Clone complete. Git LFS content is not downloaded in this version; LFS-tracked paths remain pointer files.', file=output)
     return destination_path
+
+
+def load_checkout_identity(cwd, *, validate_remote=True, run=subprocess.run):
+    """Load checkout identity and optionally verify its configured Git remote.
+
+    Parameters
+    ----------
+    cwd : pathlib.Path or str
+        Directory inside the candidate dataset checkout.
+    validate_remote : bool, optional
+        Compare the configured remote to the immutable dataset identity.
+    run : callable, optional
+        Subprocess runner override used by tests.
+
+    Returns
+    -------
+    niyan.config.CheckoutIdentity or None
+        Checkout identity, or ``None`` outside a configured Niyān checkout.
+
+    Raises
+    ------
+    GitError
+        If a configured checkout no longer points at its expected repository.
+    """
+
+    config_path = find_local_config(Path(cwd), required=False)
+    if config_path is None or not config_path.exists():
+        return None
+    identity = Configuration.load(config_path).checkout
+    if identity is None:
+        return None
+    if validate_remote:
+        _validate_checkout_remote(Path(cwd), identity, run=run)
+    return identity
+
+
+def update_checkout_path(cwd, dataset_path):
+    """Refresh the mutable path stored for an immutable checkout identity.
+
+    Parameters
+    ----------
+    cwd : pathlib.Path or str
+        Directory inside the dataset checkout.
+    dataset_path : str
+        Current canonical path returned by the server.
+    """
+
+    config_path = find_local_config(Path(cwd), required=False)
+    if config_path is None or not config_path.exists():
+        return
+    configuration = Configuration.load(config_path)
+    identity = configuration.checkout
+    if identity is None or identity.dataset_path == dataset_path:
+        return
+    configuration.set_checkout(CheckoutIdentity(host=identity.host, dataset_id=identity.dataset_id, dataset_path=dataset_path, remote=identity.remote, history=identity.history))
+    configuration.save(config_path)
+
+
+def _save_checkout_identity(checkout_path, identity):
+    """Atomically add non-secret identity to a newly cloned checkout."""
+
+    _validate_checkout_remote(checkout_path, identity, run=subprocess.run)
+    config_path = find_local_config(checkout_path, required=True)
+    configuration = Configuration.load(config_path)
+    if configuration.checkout is not None and configuration.checkout.dataset_id != identity.dataset_id:
+        raise GitError('The clone destination already contains another Niyān checkout identity.')
+    configuration.set_checkout(identity)
+    configuration.save(config_path)
+
+
+def _validate_checkout_remote(cwd, identity, *, run):
+    """Reject checkout metadata whose Git remote targets another repository."""
+
+    try:
+        result = run(['git', '-C', str(cwd), 'remote', 'get-url', identity.remote], check=False, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise GitError('Git could not validate the Niyān checkout remote.') from error
+    if result.returncode != 0:
+        raise GitError(f'The Niyān checkout remote {identity.remote!r} is unavailable.')
+    remote_url = result.stdout.strip()
+    parsed = urlparse(remote_url)
+    expected_path = f'/git/{identity.dataset_id}.git'
+    if _origin(remote_url) != _origin(identity.host) or parsed.path != expected_path or parsed.params or parsed.query or parsed.fragment:
+        raise GitError('The Git remote does not match this checkout’s Niyān dataset identity.')
 
 
 def credential_helper(*, host, username, token_id=None, storage=None, token_file=None, paths, stores, stdin=None, stdout=None):

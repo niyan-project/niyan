@@ -149,6 +149,142 @@ class ApiClient:
         query = urlencode({'path': dataset_path})
         return self.request('GET', f'/api/v1/datasets/resolve?{query}')
 
+    def resolve_namespace(self, namespace_path):
+        """Resolve a human-facing namespace path to immutable identity.
+
+        Parameters
+        ----------
+        namespace_path : str
+            Root or nested namespace path supplied by the user.
+
+        Returns
+        -------
+        tuple[int, dict]
+            HTTP status and namespace metadata.
+        """
+
+        query = urlencode({'path': namespace_path})
+        return self.request('GET', f'/api/v1/namespaces/resolve?{query}')
+
+    def create_dataset(self, *, namespace_id, slug, name):
+        """Create one empty remote dataset repository.
+
+        Parameters
+        ----------
+        namespace_id : str
+            Immutable containing namespace UUID.
+        slug : str
+            Requested dataset path component.
+        name : str
+            Dataset display name.
+
+        Returns
+        -------
+        tuple[int, dict]
+            Created status and dataset representation.
+        """
+
+        return self.request('POST', '/api/v1/datasets', payload={'namespace_id': namespace_id, 'slug': slug, 'name': name})
+
+    def list_datasets(self, *, namespace_id=None, limit=100, offset=0):
+        """Return one page of datasets visible to this credential.
+
+        Parameters
+        ----------
+        namespace_id : str, optional
+            Namespace UUID used to restrict the list.
+        limit : int, optional
+            Maximum records to return.
+        offset : int, optional
+            Ordered records to skip.
+
+        Returns
+        -------
+        tuple[int, dict]
+            Successful status and paginated dataset representation.
+        """
+
+        parameters = {'limit': limit, 'offset': offset}
+        if namespace_id is not None:
+            parameters['namespace_id'] = namespace_id
+        return self.request('GET', f'/api/v1/datasets?{urlencode(parameters)}')
+
+    def get_dataset(self, dataset_id):
+        """Retrieve public metadata for one visible dataset UUID.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Immutable dataset UUID.
+
+        Returns
+        -------
+        tuple[int, dict]
+            Successful status and dataset representation.
+        """
+
+        return self.request('GET', f'/api/v1/datasets/{dataset_id}')
+
+    def update_dataset(self, dataset_id, *, slug=None, name=None):
+        """Change selected mutable metadata on one dataset.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Immutable dataset UUID.
+        slug : str, optional
+            Replacement dataset path component.
+        name : str, optional
+            Replacement display name.
+
+        Returns
+        -------
+        tuple[int, dict]
+            Successful status and updated dataset representation.
+        """
+
+        payload = {}
+        if slug is not None:
+            payload['slug'] = slug
+        if name is not None:
+            payload['name'] = name
+        return self.request('PATCH', f'/api/v1/datasets/{dataset_id}', payload=payload)
+
+    def delete_dataset(self, dataset_id):
+        """Permanently delete one dataset and its repository.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Immutable dataset UUID.
+
+        Returns
+        -------
+        tuple[int, dict]
+            Empty successful response metadata.
+        """
+
+        return self.request('DELETE', f'/api/v1/datasets/{dataset_id}')
+
+    def get_repository_readme(self, dataset_id, *, revision='main'):
+        """Return a root README at one repository revision.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Immutable dataset UUID.
+        revision : str, optional
+            Branch, tag, or commit containing the README.
+
+        Returns
+        -------
+        tuple[int, dict]
+            Successful status and README representation.
+        """
+
+        query = urlencode({'revision': revision})
+        return self.request('GET', f'/api/v1/datasets/{dataset_id}/repository/readme?{query}')
+
     def request(self, method, path, *, payload=None, accepted_statuses=None):
         """Send one JSON API request and return status with decoded content.
 
