@@ -5,9 +5,11 @@ from uuid import UUID
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError
 from ninja import Field, Query, Router, Schema, Status
-from ninja.security import django_auth
+from ninja.errors import AuthorizationError
 from pydantic import model_validator
 
+from accounts.authentication import get_access_token, require_access, session_or_access_token
+from accounts.models import AccessToken
 from datasets.repositories import RepositoryDeletionError, RepositoryProvisioningError
 from datasets.selectors import get_deletable_dataset, get_visible_dataset, list_visible_namespace_datasets
 from datasets.services import DatasetPathConflict, create_dataset, delete_dataset, update_dataset
@@ -75,7 +77,7 @@ class ErrorResponse(Schema):
     detail: str
 
 
-router = Router(tags=['datasets'], auth=django_auth)
+router = Router(tags=['datasets'], auth=session_or_access_token)
 
 
 def serialize_dataset(dataset):
@@ -119,6 +121,7 @@ def create_dataset_endpoint(request, payload: DatasetCreateInput):
         Created dataset or a public error response.
     """
 
+    require_access(request=request, scope='api')
     namespace = Namespace.objects.filter(pk=payload.namespace_id).first()
     if namespace is None:
         return Status(404, {'code': 'namespace_not_found', 'detail': 'The requested namespace does not exist.'})
@@ -138,7 +141,7 @@ def create_dataset_endpoint(request, payload: DatasetCreateInput):
     return Status(201, serialize_dataset(dataset))
 
 
-@router.get('', response={200: DatasetListResponse, 401: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
+@router.get('', response={200: DatasetListResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
 def list_datasets_endpoint(request, namespace_id: UUID, limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0)):
     """List one page of datasets in a visible personal namespace.
 
@@ -159,14 +162,21 @@ def list_datasets_endpoint(request, namespace_id: UUID, limit: int = Query(100, 
         Dataset page or a public not-found response.
     """
 
+    access_token = get_access_token(request)
+    boundary_dataset_id = access_token.dataset_id if access_token is not None and access_token.resource_boundary == AccessToken.ResourceBoundary.DATASET else None
+    require_access(request=request, scope='read_api', dataset_id=boundary_dataset_id)
+    if boundary_dataset_id is not None and access_token.dataset.namespace_id != namespace_id:
+        raise AuthorizationError
     datasets = list_visible_namespace_datasets(namespace_id=namespace_id, user=request.auth)
     if datasets is None:
         return Status(404, {'code': 'namespace_not_found', 'detail': 'The requested namespace does not exist.'})
+    if boundary_dataset_id is not None:
+        datasets = datasets.filter(pk=boundary_dataset_id)
 
     return Status(200, {'count': datasets.count(), 'limit': limit, 'offset': offset, 'items': [serialize_dataset(dataset) for dataset in datasets[offset : offset + limit]]})
 
 
-@router.get('/{dataset_id}', response={200: DatasetResponse, 401: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
+@router.get('/{dataset_id}', response={200: DatasetResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
 def get_dataset_endpoint(request, dataset_id: UUID):
     """Retrieve a dataset by immutable identity when visible to the caller.
 
@@ -183,13 +193,14 @@ def get_dataset_endpoint(request, dataset_id: UUID):
         Dataset representation or a public not-found response.
     """
 
+    require_access(request=request, scope='read_api', dataset_id=dataset_id)
     dataset = get_visible_dataset(dataset_id=dataset_id, user=request.auth)
     if dataset is None:
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
     return Status(200, serialize_dataset(dataset))
 
 
-@router.patch('/{dataset_id}', response={200: DatasetResponse, 401: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse})
+@router.patch('/{dataset_id}', response={200: DatasetResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse})
 def update_dataset_endpoint(request, dataset_id: UUID, payload: DatasetUpdateInput):
     """Update a dataset's display name or mutable path slug.
 
@@ -208,6 +219,7 @@ def update_dataset_endpoint(request, dataset_id: UUID, payload: DatasetUpdateInp
         Updated dataset or a public error response.
     """
 
+    require_access(request=request, scope='api', dataset_id=dataset_id)
     dataset = get_visible_dataset(dataset_id=dataset_id, user=request.auth)
     if dataset is None:
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
@@ -225,7 +237,7 @@ def update_dataset_endpoint(request, dataset_id: UUID, payload: DatasetUpdateInp
     return Status(200, serialize_dataset(dataset))
 
 
-@router.delete('/{dataset_id}', response={204: None, 401: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse})
+@router.delete('/{dataset_id}', response={204: None, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse})
 def delete_dataset_endpoint(request, dataset_id: UUID):
     """Permanently delete a dataset and its bare Git repository.
 
@@ -242,6 +254,7 @@ def delete_dataset_endpoint(request, dataset_id: UUID):
         Empty success response or a public error response.
     """
 
+    require_access(request=request, scope='api', dataset_id=dataset_id)
     dataset = get_deletable_dataset(dataset_id=dataset_id, user=request.auth)
     if dataset is None:
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})

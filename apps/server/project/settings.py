@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -85,6 +86,17 @@ DATABASES = {
 }
 
 REPOSITORIES_ROOT = Path(env('NIYAN_REPOSITORIES_ROOT')).expanduser()
+
+NIYAN_ACCESS_TOKEN_MAX_DAYS = env.int('NIYAN_ACCESS_TOKEN_MAX_DAYS', default=365)
+NIYAN_DEVICE_AUTHORIZATION_LIFETIME_SECONDS = env.int('NIYAN_DEVICE_AUTHORIZATION_LIFETIME_SECONDS', default=600)
+NIYAN_DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS = env.int('NIYAN_DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS', default=5)
+
+if not 1 <= NIYAN_ACCESS_TOKEN_MAX_DAYS <= 365:
+    raise ImproperlyConfigured('NIYAN_ACCESS_TOKEN_MAX_DAYS must be between 1 and 365.')
+if NIYAN_DEVICE_AUTHORIZATION_LIFETIME_SECONDS < 1:
+    raise ImproperlyConfigured('NIYAN_DEVICE_AUTHORIZATION_LIFETIME_SECONDS must be positive.')
+if not 1 <= NIYAN_DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS <= NIYAN_DEVICE_AUTHORIZATION_LIFETIME_SECONDS:
+    raise ImproperlyConfigured('NIYAN_DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS must be positive and no greater than the device authorization lifetime.')
 
 
 # Password validation

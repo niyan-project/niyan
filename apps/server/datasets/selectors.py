@@ -21,6 +21,35 @@ def get_visible_dataset(*, dataset_id, user):
     return Dataset.objects.select_related('namespace').filter(pk=dataset_id, namespace__kind=Namespace.Kind.PERSONAL, namespace__owner_user=user, deletion_started_at__isnull=True).first()
 
 
+def get_visible_dataset_by_path(*, dataset_path, user):
+    """Return an owned personal dataset resolved from its current path.
+
+    Parameters
+    ----------
+    dataset_path : str
+        Human-facing ``namespace/dataset`` path.
+    user : accounts.models.User
+        Authenticated user requesting access.
+
+    Returns
+    -------
+    datasets.models.Dataset or None
+        Visible dataset with its namespace loaded, or ``None``.
+    """
+
+    try:
+        namespace_slug, dataset_slug = dataset_path.split('/')
+    except ValueError:
+        return None
+    return Dataset.objects.select_related('namespace').filter(
+        namespace__kind=Namespace.Kind.PERSONAL,
+        namespace__owner_user=user,
+        namespace__slug=namespace_slug,
+        slug=dataset_slug,
+        deletion_started_at__isnull=True,
+    ).first()
+
+
 def get_deletable_dataset(*, dataset_id, user):
     """Return an owned dataset including one with deletion already in progress.
 
