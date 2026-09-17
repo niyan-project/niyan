@@ -1,8 +1,8 @@
 # Niyān System Overview
 
-- **Status:** Draft
+- **Status:** Accepted
 - **Audience:** maintainers, contributors, and early adopters
-- **Last reviewed:** not yet reviewed
+- **Last reviewed:** 2026-09-17
 
 ## Summary
 
@@ -78,7 +78,7 @@ The accepted [Git LFS and object-storage protocol](git-lfs-and-object-storage.md
 
 The Nuxt application provides a Git-forge-style dataset view with namespace navigation, a default README when present, tree browsing, breadcrumbs, commits, branches, tags, and file download. Format-specific previews come from installable viewer plugins rather than hard-coded core behavior.
 
-Manual browser upload should be possible, even though the CLI is the primary workflow. The exact staging and commit interaction remains to be specified.
+Manual browser upload should be possible, even though the CLI is the primary workflow. The exact staging and commit interaction is tracked by [Issue #36](https://github.com/aryan-f/Niyan/issues/36).
 
 ### CLI
 
@@ -153,15 +153,17 @@ A bundled maintenance worker performs failed-upload and incomplete-multipart cle
 
 Administrators are responsible for coordinated backups of Git repositories, PostgreSQL, and object storage. Niyān should document consistency requirements and eventually support portable dataset export, but it is not a general backup system.
 
-## Open Questions
+## Tracked V1 Decisions
 
-- How are Git repositories stored and backed up independently of LFS objects?
-- How should an externally hosted PostgreSQL service be deployed, secured, backed up, and upgraded for development and self-hosted installations?
-- What retention, legal purge, and full reachability garbage-collection policies apply after ref deletion or history rewriting?
-- Which roles and token scopes form the smallest coherent authorization model?
-- What is the viewer plugin API, trust model, and isolation boundary?
-- What local cache and partial-fetch behavior should the CLI expose beyond the accepted command surface?
-- What filesystem URI grammar, authentication configuration, cache defaults, and async guarantees should the Python client expose?
-- Which operations are indexed synchronously, and which may be eventually consistent in the web application?
-- What portable export format preserves complete Git and LFS history across installations?
-- Which open-source license best protects the desired community model?
+The accepted overview does not imply that every component contract is finished. These genuinely unresolved v1 decisions have explicit tracker ownership:
+
+- [Issue #4](https://github.com/aryan-f/Niyan/issues/4) defines automatic Git LFS tracking, thresholds, attributes, and explicit overrides in the CLI.
+- [Issue #34](https://github.com/aryan-f/Niyan/issues/34) defines configurable protected-ref rules beyond the accepted fast-forward-only baseline.
+- [Issue #36](https://github.com/aryan-f/Niyan/issues/36) defines browser upload staging and explicit commit creation.
+- [Issue #26](https://github.com/aryan-f/Niyan/issues/26) finalizes Python filesystem addressing, authentication, capability negotiation, and sync-versus-async scope.
+- [Issue #41](https://github.com/aryan-f/Niyan/issues/41) defines the viewer plugin contract, trust model, and isolation boundary.
+- [Issue #47](https://github.com/aryan-f/Niyan/issues/47) defines coordinated backup, restore, upgrade, and disaster-recovery behavior across PostgreSQL, Git repositories, and object storage.
+- [Issue #50](https://github.com/aryan-f/Niyan/issues/50) selects the open-source license and project-governance model.
+- [Issue #52](https://github.com/aryan-f/Niyan/issues/52) publishes the final v1 API, protocol, on-disk, portability, and recovery compatibility contract.
+
+Full LFS reachability garbage collection after ref deletion or future history rewriting is an explicit v1 non-goal rather than an unresolved promise. Repository browsing reads Git directly for correctness in v1; any later metadata index is a rebuildable optimization and may be eventually consistent.

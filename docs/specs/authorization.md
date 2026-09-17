@@ -1,8 +1,8 @@
 # Niyān Authorization
 
-- **Status:** Draft
+- **Status:** Accepted
 - **Audience:** server, web, CLI, Python client, and deployment maintainers
-- **Last reviewed:** not yet reviewed
+- **Last reviewed:** 2026-09-17
 
 ## Purpose
 

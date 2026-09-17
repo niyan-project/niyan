@@ -2,7 +2,11 @@
 
 - **Status:** Draft
 - **Audience:** maintainers, client implementers, and research-computing users
-- **Last reviewed:** not yet reviewed
+- **Last reviewed:** 2026-09-17
+
+## Draft Boundary
+
+The read-only, exact-revision, streaming, and bounded-memory goals in this document are approved product direction. The specification remains draft until [Issue #26](https://github.com/aryan-f/Niyan/issues/26) finalizes the filesystem URI grammar, host and credential selection, capability negotiation, error contract, typing policy, and sync-versus-async scope.
 
 ## Purpose
 

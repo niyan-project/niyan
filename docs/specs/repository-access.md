@@ -1,8 +1,8 @@
 # Niyān Repository Access
 
-- **Status:** Draft
+- **Status:** Accepted
 - **Audience:** server, web, CLI, and Python-client maintainers
-- **Last reviewed:** not yet reviewed
+- **Last reviewed:** 2026-09-17
 
 ## Purpose
 

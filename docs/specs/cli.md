@@ -2,7 +2,11 @@
 
 - **Status:** Draft
 - **Audience:** CLI, server, and release maintainers
-- **Last reviewed:** not yet reviewed
+- **Last reviewed:** 2026-09-17
+
+## Draft Boundary
+
+The command hierarchy and behavior already approved in this document guide incremental CLI implementation. The specification remains draft because [Issue #4](https://github.com/aryan-f/Niyan/issues/4) has not yet settled automatic Git LFS tracking, thresholds, `.gitattributes` authority, and explicit storage-mode overrides. Sections affected by that decision must not be treated as an accepted tracking contract until the issue is closed and this status is reviewed again.
 
 ## Purpose
 
