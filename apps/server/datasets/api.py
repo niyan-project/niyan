@@ -1,9 +1,11 @@
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError
+from django.urls import reverse
 from ninja import Field, Query, Router, Schema, Status
 from ninja.errors import AuthorizationError
 from pydantic import model_validator
@@ -11,8 +13,9 @@ from pydantic import model_validator
 from accounts.authentication import get_access_token, require_access, session_or_access_token
 from accounts.models import AccessToken
 from datasets.repositories import RepositoryDeletionError, RepositoryProvisioningError
-from datasets.selectors import get_deletable_dataset, get_visible_dataset, list_visible_namespace_datasets
-from datasets.services import DatasetPathConflict, create_dataset, delete_dataset, update_dataset
+from datasets.models import DatasetGrant
+from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_visible_dataset, get_visible_dataset_by_path, list_visible_namespace_datasets
+from datasets.services import DatasetPathConflict, create_dataset, create_dataset_grant, delete_dataset, delete_dataset_grant, update_dataset, update_dataset_grant
 from namespaces.models import Namespace
 
 
@@ -42,6 +45,15 @@ class DatasetListResponse(Schema):
     limit: int
     offset: int
     items: list[DatasetResponse]
+
+
+class DatasetRepositoryLocationResponse(Schema):
+    """Resolve a mutable dataset path to immutable repository identity."""
+
+    id: UUID
+    path: str
+    name: str
+    git_url: str
 
 
 class DatasetUpdateInput(Schema):
@@ -77,6 +89,60 @@ class ErrorResponse(Schema):
     detail: str
 
 
+class DatasetGrantCreateInput(Schema):
+    """Describe a user or Niyān-group dataset grant."""
+
+    user_id: int | None = None
+    group_namespace_id: UUID | None = None
+    role: Literal['reader', 'contributor', 'maintainer', 'owner']
+
+    @model_validator(mode='after')
+    def require_one_principal(self) -> Self:
+        """Require exactly one grant principal.
+
+        Returns
+        -------
+        DatasetGrantCreateInput
+            Validated grant request.
+
+        Raises
+        ------
+        ValueError
+            If both or neither principal fields are selected.
+        """
+
+        if (self.user_id is None) == (self.group_namespace_id is None):
+            raise ValueError('Select exactly one dataset grant principal.')
+        return self
+
+
+class DatasetGrantUpdateInput(Schema):
+    """Describe a dataset grant role change."""
+
+    role: Literal['reader', 'contributor', 'maintainer', 'owner']
+
+
+class DatasetGrantResponse(Schema):
+    """Expose one dataset grant without conflating principal types."""
+
+    id: int
+    dataset_id: UUID
+    principal_type: str
+    principal_label: str
+    user_id: int | None
+    group_namespace_id: UUID | None
+    role: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DatasetGrantListResponse(Schema):
+    """Return the complete explicit grant list for a dataset owner."""
+
+    count: int
+    items: list[DatasetGrantResponse]
+
+
 router = Router(tags=['datasets'], auth=session_or_access_token)
 
 
@@ -101,6 +167,33 @@ def serialize_dataset(dataset):
         'slug': dataset.slug,
         'name': dataset.name,
         'created_at': dataset.created_at,
+    }
+
+
+def serialize_dataset_grant(grant):
+    """Convert a dataset grant into its explicit public representation.
+
+    Parameters
+    ----------
+    grant : datasets.models.DatasetGrant
+        Grant whose principal relations have been loaded.
+
+    Returns
+    -------
+    dict
+        Public dataset grant fields.
+    """
+
+    return {
+        'id': grant.id,
+        'dataset_id': grant.dataset_id,
+        'principal_type': grant.principal_type,
+        'principal_label': grant.principal_label,
+        'user_id': grant.user_id,
+        'group_namespace_id': grant.group_namespace_id,
+        'role': grant.role,
+        'created_at': grant.created_at,
+        'updated_at': grant.updated_at,
     }
 
 
@@ -174,6 +267,18 @@ def list_datasets_endpoint(request, namespace_id: UUID, limit: int = Query(100, 
         datasets = datasets.filter(pk=boundary_dataset_id)
 
     return Status(200, {'count': datasets.count(), 'limit': limit, 'offset': offset, 'items': [serialize_dataset(dataset) for dataset in datasets[offset : offset + limit]]})
+
+
+@router.get('/resolve', response={200: DatasetRepositoryLocationResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
+def resolve_dataset_repository_endpoint(request, path: str = Query(..., min_length=3, max_length=2048)):
+    """Resolve a human-facing path for CLI repository operations."""
+
+    dataset = get_visible_dataset_by_path(dataset_path=path, user=request.auth)
+    if dataset is None:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    require_access(request=request, scope='read_repository', dataset_id=dataset.id)
+    git_path = reverse('git-dataset-root', kwargs={'dataset_id': dataset.id})
+    return {'id': dataset.id, 'path': dataset.path, 'name': dataset.name, 'git_url': request.build_absolute_uri(git_path)}
 
 
 @router.get('/{dataset_id}', response={200: DatasetResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
@@ -266,4 +371,79 @@ def delete_dataset_endpoint(request, dataset_id: UUID):
     except RepositoryDeletionError:
         return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be deleted.'})
 
+    return Status(204, None)
+
+
+@router.get('/{dataset_id}/grants', response={200: DatasetGrantListResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse})
+def list_dataset_grants_endpoint(request, dataset_id: UUID):
+    """List explicit grants when the caller owns dataset access policy."""
+
+    require_access(request=request, scope='read_api', dataset_id=dataset_id)
+    dataset = get_grant_manageable_dataset(dataset_id=dataset_id, user=request.auth)
+    if dataset is None:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    grants = dataset.grants.select_related('user', 'group_namespace__parent').order_by('created_at', 'id')
+    return {'count': grants.count(), 'items': [serialize_dataset_grant(grant) for grant in grants]}
+
+
+@router.post('/{dataset_id}/grants', response={201: DatasetGrantResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse})
+def create_dataset_grant_endpoint(request, dataset_id: UUID, payload: DatasetGrantCreateInput):
+    """Grant a dataset role to one user or Niyān group."""
+
+    require_access(request=request, scope='api', dataset_id=dataset_id)
+    dataset = get_grant_manageable_dataset(dataset_id=dataset_id, user=request.auth)
+    if dataset is None:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+
+    user = get_user_model().objects.filter(pk=payload.user_id).first() if payload.user_id is not None else None
+    group_namespace = Namespace.objects.filter(pk=payload.group_namespace_id, kind=Namespace.Kind.GROUP).first() if payload.group_namespace_id is not None else None
+    if (payload.user_id is not None and user is None) or (payload.group_namespace_id is not None and group_namespace is None):
+        return Status(404, {'code': 'principal_not_found', 'detail': 'The requested grant principal does not exist.'})
+
+    try:
+        grant = create_dataset_grant(dataset=dataset, role=payload.role, granted_by=request.auth, user=user, group_namespace=group_namespace)
+    except PermissionDenied:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    except IntegrityError:
+        return Status(409, {'code': 'grant_conflict', 'detail': 'That principal already has an explicit grant.'})
+    except ValidationError:
+        return Status(422, {'code': 'validation_error', 'detail': 'The dataset grant is invalid.'})
+    return Status(201, serialize_dataset_grant(grant))
+
+
+@router.patch('/{dataset_id}/grants/{grant_id}', response={200: DatasetGrantResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
+def update_dataset_grant_endpoint(request, dataset_id: UUID, grant_id: int, payload: DatasetGrantUpdateInput):
+    """Change the role assigned by one explicit dataset grant."""
+
+    require_access(request=request, scope='api', dataset_id=dataset_id)
+    dataset = get_grant_manageable_dataset(dataset_id=dataset_id, user=request.auth)
+    if dataset is None:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    grant = DatasetGrant.objects.select_related('user', 'group_namespace__parent').filter(pk=grant_id, dataset=dataset).first()
+    if grant is None:
+        return Status(404, {'code': 'grant_not_found', 'detail': 'The requested dataset grant does not exist.'})
+    try:
+        grant = update_dataset_grant(grant=grant, role=payload.role, updated_by=request.auth)
+    except PermissionDenied:
+        return Status(404, {'code': 'grant_not_found', 'detail': 'The requested dataset grant does not exist.'})
+    except ValidationError:
+        return Status(422, {'code': 'validation_error', 'detail': 'The dataset grant is invalid.'})
+    return serialize_dataset_grant(grant)
+
+
+@router.delete('/{dataset_id}/grants/{grant_id}', response={204: None, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse})
+def delete_dataset_grant_endpoint(request, dataset_id: UUID, grant_id: int):
+    """Remove one explicit dataset grant."""
+
+    require_access(request=request, scope='api', dataset_id=dataset_id)
+    dataset = get_grant_manageable_dataset(dataset_id=dataset_id, user=request.auth)
+    if dataset is None:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    grant = DatasetGrant.objects.filter(pk=grant_id, dataset=dataset).first()
+    if grant is None:
+        return Status(404, {'code': 'grant_not_found', 'detail': 'The requested dataset grant does not exist.'})
+    try:
+        delete_dataset_grant(grant=grant, deleted_by=request.auth)
+    except PermissionDenied:
+        return Status(404, {'code': 'grant_not_found', 'detail': 'The requested dataset grant does not exist.'})
     return Status(204, None)

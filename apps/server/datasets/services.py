@@ -3,7 +3,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.validators import normalize_path_slug
-from datasets.models import Dataset
+from datasets.models import Dataset, DatasetGrant
+from datasets.policies import can_create_dataset, can_delete_dataset, can_manage_dataset_grants, can_update_dataset
 from datasets.repositories import GitRepositoryStore
 from namespaces.models import Namespace
 
@@ -51,7 +52,7 @@ def create_dataset(*, namespace, slug, name, created_by, repository_store=None):
         # A durable block prevents callers from wrapping this filesystem operation in a wider transaction whose later rollback would orphan the repository.
         with transaction.atomic(durable=True):
             locked_namespace = Namespace.objects.select_for_update().get(pk=namespace.pk)
-            if locked_namespace.kind != Namespace.Kind.PERSONAL or locked_namespace.owner_user_id != created_by.pk:
+            if not can_create_dataset(user=created_by, namespace=locked_namespace):
                 raise PermissionDenied('You cannot create a dataset in this namespace.')
 
             if locked_namespace.children.filter(slug=normalized_slug).exists() or locked_namespace.datasets.filter(slug=normalized_slug).exists():
@@ -101,7 +102,7 @@ def update_dataset(*, dataset, updated_by, slug=None, name=None):
     with transaction.atomic():
         locked_dataset = Dataset.objects.select_for_update().select_related('namespace').get(pk=dataset.pk)
         namespace = locked_dataset.namespace
-        if locked_dataset.deletion_started_at is not None or namespace.kind != Namespace.Kind.PERSONAL or namespace.owner_user_id != updated_by.pk:
+        if locked_dataset.deletion_started_at is not None or not can_update_dataset(user=updated_by, dataset=locked_dataset):
             raise PermissionDenied('You cannot update this dataset.')
 
         if slug is not None:
@@ -146,7 +147,7 @@ def delete_dataset(*, dataset, deleted_by, repository_store=None):
     with transaction.atomic(durable=True):
         locked_dataset = Dataset.objects.select_for_update().select_related('namespace').get(pk=dataset.pk)
         namespace = locked_dataset.namespace
-        if namespace.kind != Namespace.Kind.PERSONAL or namespace.owner_user_id != deleted_by.pk:
+        if not can_delete_dataset(user=deleted_by, dataset=locked_dataset):
             raise PermissionDenied('You cannot delete this dataset.')
 
         deletion_already_started = locked_dataset.deletion_started_at is not None
@@ -158,3 +159,101 @@ def delete_dataset(*, dataset, deleted_by, repository_store=None):
 
     with transaction.atomic(durable=True):
         Dataset.objects.select_for_update().get(pk=locked_dataset.pk).delete()
+
+
+def create_dataset_grant(*, dataset, role, granted_by, user=None, group_namespace=None):
+    """Grant one dataset role to a user or Niyān group.
+
+    Parameters
+    ----------
+    dataset : datasets.models.Dataset
+        Dataset whose access list will change.
+    role : str
+        Role from ``NamespaceMembership.Role``.
+    granted_by : accounts.models.User
+        User requesting the access change.
+    user : accounts.models.User, optional
+        Direct user principal.
+    group_namespace : namespaces.models.Namespace, optional
+        Niyān group principal.
+
+    Returns
+    -------
+    datasets.models.DatasetGrant
+        Persisted grant with its principal loaded.
+
+    Raises
+    ------
+    PermissionDenied
+        If the actor cannot administer dataset grants.
+    ValidationError
+        If the principal or role is invalid.
+    """
+
+    with transaction.atomic():
+        locked_dataset = Dataset.objects.select_for_update().select_related('namespace__parent').get(pk=dataset.pk)
+        if not can_manage_dataset_grants(user=granted_by, dataset=locked_dataset):
+            raise PermissionDenied('You cannot manage grants for this dataset.')
+        grant = DatasetGrant(dataset=locked_dataset, user=user, group_namespace=group_namespace, role=role)
+        # Let the database's conditional unique constraints arbitrate concurrent duplicate requests so callers receive a stable conflict response.
+        grant.full_clean(validate_constraints=False)
+        grant.save()
+        return grant
+
+
+def update_dataset_grant(*, grant, role, updated_by):
+    """Change the role assigned by a dataset grant.
+
+    Parameters
+    ----------
+    grant : datasets.models.DatasetGrant
+        Existing grant selected by immutable identity.
+    role : str
+        Replacement role.
+    updated_by : accounts.models.User
+        User requesting the access change.
+
+    Returns
+    -------
+    datasets.models.DatasetGrant
+        Updated grant.
+
+    Raises
+    ------
+    PermissionDenied
+        If the actor cannot administer dataset grants.
+    ValidationError
+        If the replacement role is invalid.
+    """
+
+    with transaction.atomic():
+        locked_grant = DatasetGrant.objects.select_for_update().select_related('dataset__namespace__parent', 'user', 'group_namespace').get(pk=grant.pk)
+        if not can_manage_dataset_grants(user=updated_by, dataset=locked_grant.dataset):
+            raise PermissionDenied('You cannot manage grants for this dataset.')
+        locked_grant.role = role
+        locked_grant.full_clean()
+        locked_grant.save(update_fields=['role', 'updated_at'])
+        return locked_grant
+
+
+def delete_dataset_grant(*, grant, deleted_by):
+    """Remove a dataset grant after rechecking owner policy.
+
+    Parameters
+    ----------
+    grant : datasets.models.DatasetGrant
+        Existing grant selected by identity.
+    deleted_by : accounts.models.User
+        User requesting removal.
+
+    Raises
+    ------
+    PermissionDenied
+        If the actor cannot administer dataset grants.
+    """
+
+    with transaction.atomic():
+        locked_grant = DatasetGrant.objects.select_for_update().select_related('dataset__namespace__parent').get(pk=grant.pk)
+        if not can_manage_dataset_grants(user=deleted_by, dataset=locked_grant.dataset):
+            raise PermissionDenied('You cannot manage grants for this dataset.')
+        locked_grant.delete()
