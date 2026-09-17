@@ -38,7 +38,7 @@ The minimum v1 surface should cover the `fsspec` equivalents of:
 - `cat_file` with byte-range support; and
 - `get_file` plus recursive download of a selected directory.
 
-Write, append, delete, rename, copy-to-remote, commit, and branch mutation operations are outside the v1 Python client. Those remain Git, Git LFS, CLI, or web workflows.
+Write, append, delete, rename, copy-to-remote, commit, and branch mutation operations are outside the v1 Python client. Those remain Niyān CLI or web workflows; the CLI may delegate repository mechanics to Git and Git LFS internally.
 
 The package may implement additional `fsspec` methods when they follow naturally from the same API, but must not grow a second dataset-management SDK under the guise of filesystem compatibility.
 

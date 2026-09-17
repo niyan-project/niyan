@@ -118,7 +118,8 @@ Do not invent formatter, package-manager, migration, or test commands before the
 
 ### CLI
 
-- The CLI is a Git extension and may require Git; it is not a standalone replacement for Git.
+- The `niyan` CLI is the supported user-facing interface for cloning, adding, updating, committing, and synchronizing datasets. It may require and invoke Git and Git LFS as implementation dependencies, but product documentation and workflows must not instruct users to operate dataset repositories with the Git CLI directly.
+- Standard Git compatibility remains an interoperability, maintenance, and recovery property rather than a parallel supported user experience.
 - Distribute the CLI independently from the Python client. The primary installation path should be a single-command bootstrap installer, with checksums and a documented manual alternative.
 - Delegate repository mechanics to Git and transfers to Git LFS wherever their documented behavior is sufficient.
 - Keep stdout suitable for requested command output and use stderr for diagnostics and progress.

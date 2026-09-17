@@ -15,6 +15,7 @@ Architecture decision records use corresponding `Proposed`, `Accepted`, `Depreca
 ## Current Documents
 
 - [System overview](system-overview.md) — the initial product boundary, system model, workflows, and open questions.
+- [Authentication](authentication.md) — browser sessions, CLI login, access tokens, scopes, and credential handling.
 - [Namespaces and datasets](namespaces-and-datasets.md) — stable identity, human-facing paths, and dataset repository creation.
 - [Python filesystem client](python-client.md) — the read-only PyPI package for `fsspec` streaming and downloads.
 

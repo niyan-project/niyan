@@ -15,7 +15,7 @@ The first release optimizes for a coherent, dependable dataset workflow rather t
 - Represent each dataset as a hierarchical tree of files with immutable, reproducible versions.
 - Let users browse a dataset's files, README, commits, branches, and tags in a web application.
 - Let ordinary Git repositories pin exact dataset versions, including through Git submodules.
-- Provide a standalone `niyan` CLI that coordinates Git, Git LFS, and the Niyān API without hiding their standard behavior.
+- Provide a standalone `niyan` CLI as the supported interface for dataset repository workflows while delegating their mechanics to Git and Git LFS internally.
 - Support users, groups, namespaces, dataset access, tokens, and branch protection.
 - Transfer large objects directly to and from S3-compatible storage without routing their bytes through Django.
 - Publish a separate PyPI package that exposes datasets as a read-only `fsspec` filesystem for streaming and downloading files on workstations, clusters, and HPC systems.
@@ -42,7 +42,7 @@ The first release optimizes for a coherent, dependable dataset workflow rather t
 
 A dataset is a standard Git repository. Git trees encode its directory hierarchy, blobs encode ordinary files and Git LFS pointer files, commits encode immutable versions, and refs encode branches and tags. Niyān does not assign a separate dataset commit identifier.
 
-Dataset commits may be created with standard Git tooling. Niyān adds access control, hosting, browsing, large-object transfer, and workflow assistance around the repository.
+Niyān preserves standard Git repository and object formats, but users are expected to create and mutate dataset history through the `niyan` CLI rather than invoking the Git or Git LFS CLIs directly. Git compatibility keeps the data portable and gives administrators a recovery and maintenance escape hatch; it is not a parallel supported product workflow.
 
 A project may consume multiple datasets, and multiple projects may consume the same dataset. A Git submodule pinned to a dataset commit is a first-class integration pattern, but submodules are not the definition of a dataset and direct clones remain valid.
 
@@ -82,7 +82,9 @@ Manual browser upload should be possible, even though the CLI is the primary wor
 
 ### CLI
 
-The standalone `niyan` CLI operates inside Git repositories and coordinates standard Git, Git LFS, and REST operations. Git is a required dependency for the initial CLI. The CLI must support exact-version workflows and selective file or directory retrieval where standard Git LFS behavior permits it.
+The standalone `niyan` CLI owns the supported dataset repository workflow and coordinates Git, Git LFS, and REST operations internally. Git and Git LFS may be required implementation dependencies for the initial CLI, but users should not need to understand or invoke them directly. The CLI must support exact-version workflows and selective file or directory retrieval where standard Git LFS behavior permits it.
+
+Direct Git operations against a Niyān dataset may remain technically possible because the repository and transport are standard, but they are outside the supported user experience. Niyān documentation, diagnostics, authentication setup, and compatibility guarantees target CLI-mediated operations.
 
 The CLI is distributed independently from the Python package. Its primary installation experience should be a single-command bootstrap installer, with published checksums and a documented manual installation path. The implementation language and packaging format are not yet selected.
 
@@ -110,9 +112,9 @@ Initial role names and exact permissions are not yet accepted. The model should 
 
 1. A user creates a dataset in a namespace through the API, web application, or CLI.
 2. Niyān creates or registers its Git repository and LFS endpoint.
-3. The user adds files, with large content represented by Git LFS pointers, and creates a Git commit.
-4. Git LFS uploads missing objects directly to S3-compatible storage using authorized transfer actions.
-5. Git pushes the commit and proposed ref update.
+3. The `niyan` CLI adds files and creates dataset commits while delegating repository and large-file mechanics to Git and Git LFS.
+4. Under CLI orchestration, Git LFS uploads missing objects directly to S3-compatible storage using authorized transfer actions.
+5. The CLI invokes Git to push the commit and proposed ref update.
 6. The server authenticates the actor, enforces dataset and protected-ref policy, and ensures required LFS objects are available before accepting the update.
 7. Rebuildable indexes and the web view catch up to the accepted Git state.
 
@@ -120,9 +122,9 @@ The exact transaction boundary between LFS verification, Git receive, and index 
 
 ### Consume a Dataset from a Project
 
-1. A project records the dataset repository and exact commit, commonly as a Git submodule.
+1. The `niyan` CLI adds the dataset to the project, commonly as a Git submodule pinned to an exact commit.
 2. The user authenticates through the `niyan` CLI using a browser flow or access token.
-3. Git obtains repository objects and Git LFS obtains only the required file content.
+3. The CLI invokes Git and Git LFS internally to obtain repository objects and only the required large-file content.
 4. The project remains reproducible because its Git history pins an immutable dataset commit instead of following a moving branch.
 
 ### Browse a Dataset
