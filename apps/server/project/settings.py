@@ -35,6 +35,8 @@ ALLOWED_HOSTS = env.list('NIYAN_ALLOWED_HOSTS', default=[])
 
 INSTALLED_APPS = [
     'accounts.apps.AccountsConfig',
+    'namespaces.apps.NamespacesConfig',
+    'datasets.apps.DatasetsConfig',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -81,6 +83,8 @@ WSGI_APPLICATION = 'project.wsgi.application'
 DATABASES = {
     'default': env.db('NIYAN_DATABASE_URL'),
 }
+
+REPOSITORIES_ROOT = Path(env('NIYAN_REPOSITORIES_ROOT')).expanduser()
 
 
 # Password validation
