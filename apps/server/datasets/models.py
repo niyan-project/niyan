@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models import Q
 
@@ -113,3 +114,67 @@ class DatasetGrant(models.Model):
         """Return a concise grant description for administrative displays."""
 
         return f'{self.principal_label} as {self.role} on {self.dataset.path}'
+
+
+class LfsObject(models.Model):
+    """Track one dataset-scoped Git LFS object and its verified lifecycle."""
+
+    class State(models.TextChoices):
+        """Describe whether object content may satisfy repository operations."""
+
+        PENDING = 'pending', 'Pending'
+        AVAILABLE = 'available', 'Available'
+        REFERENCED = 'referenced', 'Referenced'
+
+    class VerificationMethod(models.TextChoices):
+        """Describe the strongest storage evidence validated at finalization."""
+
+        SIZE = 'size', 'Size only'
+        SHA256 = 'sha256', 'SHA-256'
+        CRC32C = 'crc32c', 'CRC32C'
+        CRC32 = 'crc32', 'CRC32'
+
+    dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE, related_name='lfs_objects')
+    oid = models.CharField(max_length=64, validators=[RegexValidator(regex=r'^[0-9a-f]{64}$', message='Use a lowercase 64-character SHA-256 object identifier.')])
+    size = models.PositiveBigIntegerField()
+    state = models.CharField(max_length=10, choices=State.choices, default=State.PENDING)
+    verification_method = models.CharField(max_length=7, choices=VerificationMethod.choices, null=True, blank=True)
+    verified_checksum = models.CharField(max_length=128, null=True, blank=True)
+    available_at = models.DateTimeField(null=True, blank=True, editable=False)
+    referenced_at = models.DateTimeField(null=True, blank=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Keep identity dataset-scoped and lifecycle evidence consistent."""
+
+        constraints = [
+            models.UniqueConstraint(fields=['dataset', 'oid'], name='unique_lfs_object_in_dataset'),
+            models.CheckConstraint(
+                condition=(
+                    Q(state='pending', verification_method__isnull=True, available_at__isnull=True, referenced_at__isnull=True)
+                    | Q(state='available', verification_method__isnull=False, available_at__isnull=False, referenced_at__isnull=True)
+                    | Q(state='referenced', verification_method__isnull=False, available_at__isnull=False, referenced_at__isnull=False)
+                ),
+                name='lfs_object_state_timestamps_consistent',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(verification_method__isnull=True, verified_checksum__isnull=True)
+                    | Q(verification_method='size', verified_checksum__isnull=True)
+                    | Q(verification_method__in=['sha256', 'crc32c', 'crc32'], verified_checksum__isnull=False)
+                ),
+                name='lfs_object_verification_evidence_consistent',
+            ),
+        ]
+
+    @property
+    def storage_key(self):
+        """Derive the private relative S3 key from immutable trusted identity."""
+
+        return f'datasets/{self.dataset_id}/lfs/objects/{self.oid[:2]}/{self.oid[2:4]}/{self.oid}'
+
+    def __str__(self):
+        """Return a concise dataset-scoped object description."""
+
+        return f'{self.dataset_id}:{self.oid}'

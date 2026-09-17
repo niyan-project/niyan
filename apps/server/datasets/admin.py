@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from datasets.models import Dataset, DatasetGrant
+from datasets.models import Dataset, DatasetGrant, LfsObject
 
 
 class DatasetGrantInline(admin.TabularInline):
@@ -29,3 +29,24 @@ class DatasetGrantAdmin(admin.ModelAdmin):
     search_fields = ('dataset__name', 'dataset__slug', 'user__username', 'group_namespace__name', 'group_namespace__slug')
     autocomplete_fields = ('dataset', 'user', 'group_namespace')
     list_select_related = ('dataset__namespace', 'user', 'group_namespace')
+
+
+@admin.register(LfsObject)
+class LfsObjectAdmin(admin.ModelAdmin):
+    """Expose immutable LFS lifecycle metadata for operational inspection."""
+
+    list_display = ('oid', 'dataset', 'size', 'state', 'verification_method', 'created_at', 'available_at', 'referenced_at')
+    list_filter = ('state', 'verification_method')
+    search_fields = ('oid', 'dataset__name', 'dataset__slug', 'dataset__namespace__name', 'dataset__namespace__slug')
+    readonly_fields = ('dataset', 'oid', 'size', 'state', 'verification_method', 'verified_checksum', 'storage_key', 'available_at', 'referenced_at', 'created_at', 'updated_at')
+    list_select_related = ('dataset__namespace',)
+
+    def has_add_permission(self, request):
+        """Prevent administrators from bypassing transfer negotiation."""
+
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Require lifecycle services to coordinate metadata and object deletion."""
+
+        return False
