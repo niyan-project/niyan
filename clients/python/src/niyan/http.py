@@ -3,6 +3,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from niyan import __version__
 from niyan.errors import ApiError, ConfigurationError
 
 
@@ -161,7 +162,7 @@ class ApiClient:
         if _origin(url) != _origin(self.host):
             raise ApiError('Refusing to send credentials outside the selected Niyān host.')
         encoded_payload = json.dumps(payload).encode() if payload is not None else None
-        headers = {'Accept': 'application/json', 'User-Agent': 'niyan-cli/0.1.0'}
+        headers = {'Accept': 'application/json', 'User-Agent': f'niyan/{__version__}'}
         if encoded_payload is not None:
             headers['Content-Type'] = 'application/json'
         if self.token:

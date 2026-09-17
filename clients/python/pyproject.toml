@@ -1,7 +1,7 @@
 [project]
-name = "niyan-cli"
+name = "niyan"
 version = "0.1.0"
-description = "Standalone CLI for Niyān dataset repositories"
+description = "Niyān CLI and Python filesystem client"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
