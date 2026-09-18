@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** server, CLI, Python-client, and deployment maintainers
-- **Last reviewed:** 2026-09-17
+- **Last reviewed:** 2026-09-18
 
 ## Purpose
 
@@ -44,13 +44,13 @@ An existing object with the same dataset, object identifier, and size is reusabl
 
 ## Transfer Selection
 
-The server supports the standard `basic` transfer adapter for downloads and for uploads below the multipart threshold. A basic upload is one signed HTTP `PUT`; a basic download is one signed HTTP `GET` and may use standard range requests for retry or resume behavior.
+The server supports the standard `basic` transfer adapter for downloads and for uploads that the configured object store can safely accept as one request. A basic upload is one signed HTTP `PUT`; a basic download is one signed HTTP `GET` and may use standard range requests for retry or resume behavior. Stock Git LFS clients therefore remain supported without the Niyān transfer agent, although their uploads may be less resilient and have a lower maximum size.
 
-Niyān also defines the custom transfer adapter `niyan-multipart` for multipart uploads. The `niyan` CLI must configure this agent in each Niyān-managed dataset checkout and advertise it to the Batch API. The transfer agent is part of the unified `niyan` Python distribution; users are not expected to install another package or configure it manually.
+Niyān also defines the custom transfer adapter `niyan-multipart` for multipart uploads. The `niyan` package configures this agent through supported Git LFS configuration so ordinary `git push` and Niyān CLI operations can advertise it to the Batch API. The transfer agent is part of the unified Python distribution; users are not expected to install another package or configure it manually after Niyān login or checkout setup.
 
 The default multipart threshold is 100 MiB and is installation-configurable. If an upload batch contains any object at or above that threshold and the client advertises `niyan-multipart`, the server selects `niyan-multipart` for the entire batch. The custom agent must correctly handle every object in that batch, including smaller objects. Downloads continue to use `basic` because Git LFS already supports resumed HTTP downloads.
 
-If a required multipart upload comes from a client that does not advertise `niyan-multipart`, the server returns an actionable per-object error. This preserves ordinary Git LFS compatibility for small transfers while making the Niyān CLI the supported path for resilient large uploads. An installation may set a lower effective threshold when its storage backend has a smaller single-request limit, but it must not set a threshold above the backend's maximum single-upload size.
+The multipart threshold is a preferred transfer boundary when the client advertises `niyan-multipart`, not an unconditional rejection threshold for stock Git LFS. A client that advertises only `basic` may continue with a single signed upload when the configured backend can safely accept that object size. If the object exceeds the installation's safe basic-upload limit, the server returns an actionable per-object capability error instructing the user to configure the Niyān multipart agent. An installation may set a lower safe limit when required by its backend and must never issue a basic action beyond that backend's maximum single-upload size.
 
 The custom agent must request multipart initiation and signed part actions from Niyān, upload parts directly to object storage, complete the provider multipart upload, and notify Niyān of completion before reporting success to Git LFS. It must support bounded concurrency, incremental progress, retries of individual parts, and abort after a terminal failure. Raw storage credentials must never be returned to the agent.
 

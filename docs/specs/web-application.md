@@ -62,7 +62,7 @@ Group membership management lists, adds, changes, and removes direct members. In
 
 ## Dataset Management
 
-The dashboard and group pages allow authorized users to create dataset records with optional descriptions, rename datasets, change dataset slugs and descriptions, and permanently delete datasets using exact-path confirmation. Dataset content creation and browser upload are outside Phase 3; users populate and mutate repository content through the `niyan` CLI.
+The dashboard and group pages allow authorized users to create dataset records with optional descriptions, rename datasets, change dataset slugs and descriptions, and permanently delete datasets using exact-path confirmation. Dataset content creation and browser upload are outside Phase 3; users populate and mutate repository content through the recommended `niyan` CLI or supported standard Git and Git LFS clients.
 
 Changing a human-facing group or dataset path must not imply an identity change. The frontend must use immutable UUIDs for API mutation and refresh path-based routes after a successful rename.
 
@@ -72,9 +72,9 @@ Inaccessible datasets and groups are rendered as not found rather than revealing
 
 The dataset page provides separate branch and tag views, commits, tree breadcrumbs, file metadata, root README rendering, and authorized downloads. Every tree, commit, README, and file request must expose or retain the exact resolved commit so one page load does not silently combine moving revisions.
 
-The clone action uses a compact popover that presents the supported `niyan dataset clone` command, explains what the CLI configures, exposes the standard Git URL for interoperability, and provides explicit copy controls. Niyān CLI instructions remain the ordinary workflow even though the underlying repository is standard Git.
+The clone action uses a compact popover that presents the recommended `niyan dataset clone` command and a supported standard `git clone` command with separate copy controls. It explains that Niyān configures authentication, shallow history, automatic LFS attributes, selective materialization, and multipart uploads, while standard Git users choose those behaviors themselves. The standard Git URL is a supported product interface rather than a recovery-only interoperability detail.
 
-An empty dataset replaces the ordinary file table with a first-push guide. It covers starting from an empty checkout and bringing existing files into a clean Niyān checkout without instructing users to operate the dataset through the Git CLI directly.
+An empty dataset replaces the ordinary file table with a first-push guide. It leads with the recommended Niyān workflow and may also show the equivalent standard Git and Git LFS workflow, including the user's responsibility to configure `.gitattributes` and suitable clone depth.
 
 README Markdown is untrusted. Raw HTML is disabled and generated links must use safe protocols. Unsupported file formats receive metadata and download actions rather than ad hoc previews. Format-specific inline experiences belong to the viewer-plugin contract.
 

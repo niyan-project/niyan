@@ -80,11 +80,13 @@ Tokens must not be accepted in query parameters. Authentication failures use a s
 
 Git over HTTPS is the only Git transport supported in v1. SSH Git transport is outside the initial product.
 
-Users are not expected to invoke Git or Git LFS directly. For operations such as dataset clone, add, update, commit, and synchronization, the `niyan` CLI invokes those tools internally with a temporary, host-specific credential-helper configuration. It must not write a token into a remote URL, `.gitmodules`, repository configuration, command-line argument, or process-visible environment intended for the child Git command.
+Standard Git and Git LFS are supported clients. They authenticate with a Niyān access token as the HTTPS Basic password; the username is informational. A manually issued token may be supplied through any trustworthy Git credential helper. Account passwords remain invalid for this surface.
 
-When an internally invoked Git or Git LFS process requests credentials, Niyān's credential helper returns a username and the stored access token as the HTTPS Basic-authentication password. Read operations require `read_repository`; pushes and LFS uploads require `write_repository`. Django authenticates and authorizes the request before invoking Git's smart-HTTP backend or issuing an LFS transfer action.
+The Python distribution exposes `git-credential-niyan`. Unless the user opts out, `niyan auth login` registers it through host-scoped Git configuration and enables HTTP-path credential matching for that installation. The helper returns a username and the selected stored access token only for the exact configured origin. Repository paths containing `/git/<dataset-uuid>.git` allow it to honor dataset-bound credentials; unrelated origins receive no credential response. The helper must coexist with unrelated configured helpers rather than replace them globally.
 
-The CLI should inject its credential helper only into Git processes it launches rather than installing a global helper automatically. This keeps direct Git CLI usage outside the supported workflow while preserving standard protocol compatibility.
+Read operations require `read_repository`; pushes and LFS uploads require `write_repository`. Django authenticates and authorizes every request before invoking Git's smart-HTTP backend or issuing an LFS transfer action. The helper is credential selection, not authorization, and bypassing or replacing it cannot bypass server policy.
+
+The CLI may also inject an ephemeral helper into a child Git process when an explicit environment token or other process-local selection must take precedence. Neither persistent nor ephemeral configuration may write a token into a remote URL, `.gitmodules`, repository configuration, command-line argument, or ordinary process environment.
 
 ## Local Credential Storage
 

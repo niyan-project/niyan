@@ -2,11 +2,13 @@
 
 - **Status:** Accepted
 - **Audience:** CLI, Git LFS, and testing maintainers
-- **Last reviewed:** 2026-09-17
+- **Last reviewed:** 2026-09-18
 
 ## Purpose
 
 This specification defines how `niyan add` chooses between ordinary Git blobs and Git LFS for dataset files. The policy must be deterministic, visible in standard `.gitattributes` files, compatible with stock Git LFS, and stable across later edits.
+
+This is a Niyān CLI convenience policy, not a server acceptance rule. A user who invokes `git add` or edits `.gitattributes` directly owns that choice. The server does not reject an otherwise valid and authorized ref update merely because a Git blob would have been classified into LFS by this policy.
 
 Git LFS does not provide a dynamic size-threshold tracking mode. Tracking is selected through Git attributes, so Niyān must persist every automatic or explicit LFS decision that was not already expressed by an applicable attribute rule. Niyān configures and invokes stock Git and Git LFS rather than replacing their clean, smudge, staging, or pre-push machinery. This specification follows [ADR 0003](../architecture/decisions/0003-git-lfs-s3-data-plane.md) and the upstream [git-lfs-track](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-track.adoc) behavior.
 
@@ -81,7 +83,7 @@ If any requested path cannot be classified or persisted safely, `niyan add` must
 
 `niyan add --lfs <paths>...` forces supported regular files into Git LFS and persists literal or recursive attribute rules as described above. It is appropriate for opaque, generated, or machine-readable text that the NUL heuristic would otherwise leave in Git.
 
-`niyan add --git <paths>...` forces supported regular files into ordinary Git and persists rules that disable the LFS filter. It is appropriate for a binary-sniffed file that should remain reviewable or for a file covered by a broader LFS pattern. Large ordinary Git blobs are allowed only through this explicit choice or an explicit attribute rule; the CLI should warn when the choice places a file larger than 10 MiB in Git, but it must honor it.
+`niyan add --git <paths>...` forces supported regular files into ordinary Git and persists rules that disable the LFS filter. It is appropriate for a binary-sniffed file that should remain reviewable or for a file covered by a broader LFS pattern. Within `niyan add`, this explicit choice or an applicable attribute rule is required to place a newly classified large file into ordinary Git. The CLI should warn when the choice places a file larger than 10 MiB in Git, but it must honor it. Direct standard Git staging remains outside this classifier and is not rejected by the server merely for making another choice.
 
 Overrides do not follow symlink targets and do not convert nested repositories or special filesystem entries into supported files. Applying the already-effective mode is idempotent.
 

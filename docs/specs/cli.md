@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Audience:** CLI, server, and release maintainers
-- **Last reviewed:** 2026-09-17
+- **Last reviewed:** 2026-09-18
 
 ## Purpose
 
-The standalone `niyan` CLI is the supported user interface for creating, consuming, and versioning dataset repositories. Users should not need to invoke Git or Git LFS directly inside a Niyān dataset checkout. The CLI delegates repository mechanics to those standard tools while owning authentication, remote resolution, large-file coordination, safe defaults, and user-facing diagnostics.
+The standalone `niyan` CLI is the highly recommended interface for creating, consuming, and versioning dataset repositories. It delegates repository mechanics to standard Git and Git LFS while providing authentication, remote resolution, large-file coordination, safe defaults, and dataset-oriented diagnostics.
 
-The CLI consumes only documented REST, Git smart-HTTP, and Git LFS interfaces. It must not import Django server code. A parent research or machine-learning repository remains an ordinary Git repository; the requirement to use Niyān commands applies to dataset repositories managed by Niyān.
+Standard Git and Git LFS over HTTPS are also supported interfaces. Users may mix ordinary Git commands with Niyān commands when their checkout configuration and history state satisfy the command's documented preconditions. The CLI consumes only documented REST, Git smart-HTTP, and Git LFS interfaces and must not import Django server code.
 
 ## Implementation and Distribution
 
@@ -108,11 +108,14 @@ niyan auth login [hostname] --local
 niyan auth login [hostname] --dataset <namespace/dataset>
 niyan auth login [hostname] --read-only
 niyan auth login [hostname] --with-token
+niyan auth login [hostname] --no-git-credential-helper
 niyan auth status [--host <host>] [--dataset <namespace/dataset>]
 niyan auth logout [--host <host>] [--local] [--dataset <namespace/dataset>] [--forget]
 ```
 
 `auth login` uses the browser-assisted device flow by default. It opens the verification page when possible, prints the verification URL and user code for headless environments, respects the server-provided polling interval, and stores a token only after approval.
+
+After storing the token, login configures the installed `git-credential-niyan` helper for the selected HTTPS origin and enables path-aware credential selection. It also makes the Niyān multipart Git LFS transfer agent available through standard Git configuration. `--no-git-credential-helper` leaves Git configuration unchanged for users who manage credentials independently; it does not change token issuance or Niyān CLI authentication.
 
 The default login requests `api` and `write_repository`. `--read-only` requests `read_api` and `read_repository`. `--dataset` requests a server-enforced single-dataset boundary. `--with-token` reads one manually issued token from standard input; it must not accept the secret from an argument or echo it.
 
@@ -141,7 +144,9 @@ niyan dataset delete [<namespace/dataset>]
 
 `dataset create` creates an empty remote dataset. With no path, an interactive terminal may prompt for the namespace, slug, and display name. `--clone` immediately creates its local checkout. `--source` turns an existing directory into the initial dataset working copy, applies the accepted LFS tracking policy, creates an initial commit after showing the planned changes, and pushes it. It must refuse a source directory whose existing Git state would be overwritten or ambiguously repurposed.
 
-`dataset clone` resolves the mutable path to an immutable UUID, invokes Git smart HTTP with a temporary Niyān credential helper, and configures checkout-private Niyān metadata. The metadata records the installation host, immutable dataset UUID, last-known canonical path, remote name, and history policy beneath the checkout's private Git directory. It must not place credentials in the URL, command arguments, child environment, `.git/config`, or `.gitmodules`. Commands inside the checkout resolve the dataset by UUID, verify that the configured remote still targets that UUID on the recorded host, and refresh a stale canonical path after a server-side rename.
+`dataset clone` resolves the mutable path to an immutable UUID, invokes Git smart HTTP, and configures checkout-private Niyān metadata. The metadata records the installation host, immutable dataset UUID, last-known canonical path, remote name, and history policy beneath the checkout's private Git directory. It must not place credentials in the URL, command arguments, child environment, `.git/config`, or `.gitmodules`. Commands inside the checkout resolve the dataset by UUID, verify that the configured remote still targets that UUID on the recorded host, and refresh a stale canonical path after a server-side rename.
+
+A checkout created by standard `git clone` remains a valid dataset checkout. A Niyān command may derive its installation and immutable dataset UUID from a canonical `/git/<dataset-uuid>.git` remote, confirm them through the server, and write optional checkout-private metadata. It must reject an ambiguous or non-Niyān remote rather than treating private metadata as the source of repository identity.
 
 Dataset clones are shallow, single-branch, depth-one clones without tags by default. `--full-history` requests ordinary complete Git history and remote refs for the exceptional workflow that needs them. Later fetch and pull operations preserve the checkout's shallow history policy unless the user explicitly requests full history. Fetching another branch may retain commits required by local branches, commits, stashes, or unpushed work; Niyān must never discard local-only state merely to reduce disk usage.
 
@@ -323,7 +328,7 @@ Commands may provide a more specific machine-readable error code in JSON output 
 
 ## Security and Delegation
 
-The CLI injects its credential helper only into child Git and Git LFS processes it launches. It never installs a global Git credential helper automatically. The helper verifies protocol and host before returning a credential, and server-side token scopes and resource boundaries remain authoritative.
+The distribution exposes `git-credential-niyan`, and login registers it only for the selected installation origin unless the user opts out. It must not replace unrelated credential helpers. The helper verifies protocol, origin, and repository path before returning a credential, and server-side token scopes and resource boundaries remain authoritative. Process-local environment credentials may still use an ephemeral helper for a specific child operation.
 
 Git and Git LFS subprocesses receive the minimum environment required for the operation. Niyān must validate server-provided clone and transfer URLs before invoking another process or making an authenticated request. User-controlled paths and revisions are passed without a shell.
 
@@ -335,7 +340,6 @@ Temporary downloads and credential handoffs use private permissions and are remo
 - Git over SSH.
 - Rebase, cherry-pick, bisect, reflog, stash, arbitrary reset, or history-filtering interfaces.
 - Plain force-push or silent history rewriting.
-- Raw Git LFS commands.
 - Semantic file diffs or merges.
 - CLI aliases or third-party CLI extensions.
 - Multiple simultaneously active accounts on one host.

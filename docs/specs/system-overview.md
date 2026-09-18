@@ -42,7 +42,7 @@ The first release optimizes for a coherent, dependable dataset workflow rather t
 
 A dataset is a standard Git repository. Git trees encode its directory hierarchy, blobs encode ordinary files and Git LFS pointer files, commits encode immutable versions, and refs encode branches and tags. Niyān does not assign a separate dataset commit identifier.
 
-Niyān preserves standard Git repository and object formats, but users are expected to create and mutate dataset history through the `niyan` CLI rather than invoking the Git or Git LFS CLIs directly. Git compatibility keeps the data portable and gives administrators a recovery and maintenance escape hatch; it is not a parallel supported product workflow.
+Niyān supports standard Git and Git LFS over HTTPS as a normal user workflow. The `niyan` CLI remains the highly recommended interface because it configures authentication and large-file behavior, supplies safer defaults, and presents dataset-oriented diagnostics, but repository validity and server authorization do not depend on using it. This follows [ADR 0011](../architecture/decisions/0011-support-standard-git-workflows.md).
 
 A project may consume multiple datasets, and multiple projects may consume the same dataset. A Git submodule pinned to a dataset commit is a first-class integration pattern, but submodules are not the definition of a dataset and direct clones remain valid.
 
@@ -68,7 +68,7 @@ Git objects are immutable, but refs are mutable pointers. The accepted [Git writ
 
 ### Large-object Data Plane
 
-Files selected by committed Git attributes or the accepted [CLI Git LFS tracking policy](cli-lfs-tracking.md) are represented in Git by standard LFS pointer blobs. By default, a new regular file uses LFS when it is binary according to Git's NUL-byte heuristic or larger than 10 MiB; existing paths preserve their storage mode. LFS object bytes are stored in S3-compatible object storage under a layout controlled by Niyān.
+Files selected by committed Git attributes are represented in Git by standard LFS pointer blobs. When `niyan add` owns staging, the accepted [CLI Git LFS tracking policy](cli-lfs-tracking.md) selects LFS for a new regular file that is binary according to Git's NUL-byte heuristic or larger than 10 MiB; existing paths preserve their storage mode. A user staging through standard Git owns their `.gitattributes` choices, and the server does not impose this CLI recommendation on ordinary Git blobs. LFS object bytes are stored in S3-compatible object storage under a layout controlled by Niyān.
 
 For large-object upload or download, an authorized Git LFS batch request returns short-lived object-specific transfer actions. The client transfers bytes directly to or from object storage. Niyān requires successful upload finalization before a newly uploaded object is considered available to repository operations.
 
@@ -84,9 +84,9 @@ Manual browser upload should be possible, even though the CLI is the primary wor
 
 ### CLI
 
-The `niyan` CLI owns the supported dataset repository workflow and coordinates Git, Git LFS, and REST operations internally. Git and Git LFS may be required implementation dependencies for repository-oriented commands, but users should not need to understand or invoke them directly. The CLI must support exact-version workflows and selective file or directory retrieval where standard Git LFS behavior permits it.
+The `niyan` CLI is the recommended dataset-oriented workflow and coordinates Git, Git LFS, and REST operations internally. It provides exact-version workflows, selective materialization, shallow-history defaults, automatic LFS attribute management, multipart upload configuration, and Niyān-specific diagnostics.
 
-Direct Git operations against a Niyān dataset may remain technically possible because the repository and transport are standard, but they are outside the supported user experience. Niyān documentation, diagnostics, authentication setup, and compatibility guarantees target CLI-mediated operations.
+Direct Git and Git LFS operations against a Niyān dataset are also supported. Standard clients use the same access tokens, smart-HTTP repository endpoints, Git LFS Batch API, and server policy. Users who choose those clients are responsible for ordinary Git decisions such as clone depth, merge strategy, and `.gitattributes` rules, and may not receive every convenience or resilient-transfer feature of the Niyān CLI.
 
 The CLI is the console entry point of the unified `niyan` Python distribution. `pipx install niyan` is the standard isolated PyPI installation. A single-command bootstrap installer, published checksums, and a documented manual installation path provide a polished alternative without asking users to manage a virtual environment themselves.
 

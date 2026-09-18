@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** server, CLI, authorization, and deployment maintainers
-- **Last reviewed:** 2026-09-17
+- **Last reviewed:** 2026-09-18
 
 ## Purpose
 
@@ -21,7 +21,7 @@ GET  /git/<dataset-uuid>.git/info/refs?service=git-receive-pack
 POST /git/<dataset-uuid>.git/git-receive-pack
 ```
 
-Dumb HTTP, SSH, direct filesystem access, and an independently implemented receive protocol are outside v1. The Niyān CLI is the supported user interface and invokes Git internally, but the endpoint remains standards-compatible for maintenance and recovery.
+Dumb HTTP, SSH, direct filesystem access, and an independently implemented receive protocol are outside v1. Both the recommended Niyān CLI and standard Git clients use this supported smart-HTTP endpoint.
 
 Both receive-pack advertisement and execution require HTTPS Basic authentication. The username is informational and the access token is the password. The credential must grant `write_repository`, its resource boundary must include the dataset, and its owner must currently have at least the `contributor` role. `write_repository` includes the corresponding read access required by Git negotiation.
 
@@ -63,7 +63,7 @@ Each proposed update includes the ref value the client observed. Git must compar
 
 The Niyān CLI must request Git's atomic push capability whenever it sends more than one ref update, and the server must advertise atomic push support. The pre-receive policy evaluates the complete proposed ref set and rejects the entire push when any update violates authorization, ref, or LFS policy. Niyān commands must not report a multi-ref push as successful unless Git reports every requested update as accepted.
 
-Direct Git clients that deliberately omit atomic mode are outside the supported user workflow and may receive Git's native per-ref transaction behavior after the all-or-nothing pre-receive checks pass. Niyān never attempts to repair or conceal a partial result caused by a later Git ref-lock race; it reports Git's result accurately.
+Standard Git clients that omit atomic mode may receive Git's native per-ref transaction behavior after the all-or-nothing pre-receive checks pass. Niyān never attempts to repair or conceal a partial result caused by a later Git ref-lock race; it reports Git's result accurately. Clients that need all-or-nothing publication of several refs must request Git's atomic capability.
 
 Git's object connectivity checks must remain enabled. Newly received objects stay in Git's quarantine area until pre-receive succeeds. A rejected push must not move quarantined objects into the repository's main object store or update any ref.
 
@@ -86,7 +86,7 @@ The scan must cover complete newly reachable history, not only the final tree, s
 
 The hook recognizes canonical Git LFS pointer blobs independently of filename or dataset format. Enforcing which ordinary files should have been tracked by Git LFS belongs to the separate LFS tracking policy; this hook's availability check must not invent that policy.
 
-If any required LFS object is absent, pending, has an inconsistent size, belongs to another dataset, or cannot be checked because storage metadata is unavailable, the entire push is rejected. The error identifies the affected ref and a bounded number of object identifiers and tells the user to retry `niyan push`; it must not reveal storage keys or provider details.
+If any required LFS object is absent, pending, has an inconsistent size, belongs to another dataset, or cannot be checked because storage metadata is unavailable, the entire push is rejected. The error identifies the affected ref and a bounded number of object identifiers and tells the user to upload the missing objects with Niyān or Git LFS before retrying the push; it must not reveal storage keys or provider details.
 
 ## Push Context and LFS Leases
 
