@@ -344,6 +344,34 @@ class RepositoryBrowser:
         process = self._popen(['cat-file', 'blob', metadata.object_id])
         return resolved_commit, metadata, _stream_process(process)
 
+    def open_blob_range(self, *, revision, path, start, end):
+        """Open a bounded byte range from one ordinary Git blob.
+
+        Parameters
+        ----------
+        revision : str
+            Branch, tag, or exact commit containing the file.
+        path : str
+            Repository-relative file path.
+        start : int
+            Inclusive byte offset.
+        end : int
+            Exclusive byte offset.
+
+        Returns
+        -------
+        tuple[str, BlobMetadata, collections.abc.Iterator[bytes]]
+            Resolved commit, metadata, and bounded incremental content.
+        """
+
+        resolved_commit, metadata = self.get_blob_metadata(revision=revision, path=path)
+        if metadata.lfs_object_id is not None:
+            raise LfsContentUnavailable('Git LFS content is not available yet.')
+        if not 0 <= start <= end <= metadata.size:
+            raise InvalidRepositoryInput('The requested byte range is invalid.')
+        process = self._popen(['cat-file', 'blob', metadata.object_id])
+        return resolved_commit, metadata, _stream_process_range(process, start=start, end=end)
+
     def read_readme(self, *, revision):
         """Return a conventional root README capped to a safe response size.
 
@@ -543,6 +571,29 @@ def _stream_process(process):
             chunk = process.stdout.read(64 * 1024)
             if not chunk:
                 break
+            yield chunk
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait()
+
+
+def _stream_process_range(process, *, start, end):
+    """Discard a bounded prefix and yield only the requested byte interval."""
+
+    remaining_skip = start
+    remaining_content = end - start
+    try:
+        while remaining_skip:
+            chunk = process.stdout.read(min(64 * 1024, remaining_skip))
+            if not chunk:
+                raise RepositoryBrowseError('The Git blob ended before the requested range.')
+            remaining_skip -= len(chunk)
+        while remaining_content:
+            chunk = process.stdout.read(min(64 * 1024, remaining_content))
+            if not chunk:
+                raise RepositoryBrowseError('The Git blob ended before the requested range.')
+            remaining_content -= len(chunk)
             yield chunk
     finally:
         if process.poll() is None:

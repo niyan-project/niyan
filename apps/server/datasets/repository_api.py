@@ -3,7 +3,7 @@ from typing import Literal
 from urllib.parse import urlencode
 from uuid import UUID
 
-from django.http import StreamingHttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.utils.http import content_disposition_header
 from ninja import Query, Router, Schema, Status
 
@@ -249,20 +249,34 @@ def get_repository_blob_endpoint(request, dataset_id: UUID, path: str, revision:
         return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be read.'})
 
 
-@router.get('/{dataset_id}/repository/blob/raw', response={200: None, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse, 503: ErrorResponse})
+@router.get('/{dataset_id}/repository/blob/raw', response={200: None, 206: None, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 416: None, 422: ErrorResponse, 503: ErrorResponse})
 def download_repository_blob_endpoint(request, dataset_id: UUID, path: str, revision: str = 'main'):
-    """Stream one ordinary Git-resident blob without buffering it."""
+    """Stream one ordinary Git-resident blob with single-range support."""
 
     try:
         browser = get_browser(request, dataset_id)
         if browser is None:
             return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
-        resolved_commit, metadata, content = browser.open_blob(revision=revision, path=path)
-        response = StreamingHttpResponse(content, content_type='application/octet-stream')
-        response['Content-Length'] = str(metadata.size)
+        resolved_commit, metadata = browser.get_blob_metadata(revision=revision, path=path)
+        if metadata.lfs_object_id is not None:
+            raise LfsContentUnavailable('Git LFS content is not available yet.')
+        try:
+            byte_range = _parse_byte_range(request.headers.get('Range'), size=metadata.size)
+        except ValueError:
+            response = HttpResponse(status=416)
+            response['Content-Range'] = f'bytes */{metadata.size}'
+            response['Accept-Ranges'] = 'bytes'
+            return response
+        start, end = byte_range if byte_range is not None else (0, metadata.size)
+        _, _, content = browser.open_blob_range(revision=resolved_commit, path=metadata.path, start=start, end=end)
+        response = StreamingHttpResponse(content, status=206 if byte_range is not None else 200, content_type='application/octet-stream')
+        response['Content-Length'] = str(end - start)
         response['Content-Disposition'] = content_disposition_header(True, metadata.path.rsplit('/', 1)[-1])
         response['ETag'] = f'"{metadata.object_id}"'
         response['X-Niyan-Resolved-Commit'] = resolved_commit
+        response['Accept-Ranges'] = 'bytes'
+        if byte_range is not None:
+            response['Content-Range'] = f'bytes {start}-{end - 1}/{metadata.size}'
         return response
     except LfsContentUnavailable:
         return Status(409, {'code': 'lfs_content_unavailable', 'detail': 'Git LFS content is not available yet.'})
@@ -274,6 +288,32 @@ def download_repository_blob_endpoint(request, dataset_id: UUID, path: str, revi
         return Status(422, {'code': 'validation_error', 'detail': 'The repository request is invalid.'})
     except RepositoryBrowseError:
         return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be read.'})
+
+
+def _parse_byte_range(header, *, size):
+    """Parse one RFC 9110 byte range into inclusive/exclusive offsets."""
+
+    if header is None:
+        return None
+    if not header.startswith('bytes=') or ',' in header:
+        raise ValueError('Only one byte range is supported.')
+    start_text, separator, end_text = header[6:].partition('-')
+    if not separator or (not start_text and not end_text):
+        raise ValueError('The byte range is malformed.')
+    try:
+        if not start_text:
+            suffix_length = int(end_text)
+            if suffix_length <= 0 or size == 0:
+                raise ValueError('The byte range is unsatisfiable.')
+            start = max(0, size - suffix_length)
+            return start, size
+        start = int(start_text)
+        end = size if not end_text else min(size, int(end_text) + 1)
+    except ValueError as error:
+        raise ValueError('The byte range is malformed.') from error
+    if start < 0 or start >= size or end <= start:
+        raise ValueError('The byte range is unsatisfiable.')
+    return start, end
 
 
 @router.get('/{dataset_id}/repository/download', response={200: DownloadActionResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse, 503: ErrorResponse})
@@ -298,7 +338,7 @@ def authorize_repository_download_endpoint(request, dataset_id: UUID, path: str,
                 'url': request.build_absolute_uri(f'/api/v1/datasets/{dataset_id}/repository/blob/raw?{query}'),
                 'headers': {},
                 'expires_in': None,
-                'range_supported': False,
+                'range_supported': True,
             }
 
         lfs_object = LfsObject.objects.select_related('dataset').filter(dataset_id=dataset_id, oid=metadata.lfs_object_id, size=metadata.lfs_size, state__in=[LfsObject.State.AVAILABLE, LfsObject.State.REFERENCED]).first()

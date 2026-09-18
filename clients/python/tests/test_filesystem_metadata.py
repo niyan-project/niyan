@@ -19,7 +19,7 @@ class FakeFileSystemApi:
 
     def capabilities(self):
         self.calls.append(('capabilities', self.host, self.token))
-        return 200, {'api_versions': ['v1'], 'filesystem': {'protocol_version': 1, 'features': ['dataset-path-resolution', 'exact-revision-resolution', 'repository-metadata']}}
+        return 200, {'api_versions': ['v1'], 'filesystem': {'protocol_version': 1, 'features': ['dataset-path-resolution', 'exact-revision-resolution', 'repository-metadata', 'git-blob-reads', 'authorized-lfs-download-actions']}}
 
     def resolve_dataset(self, locator_path):
         self.calls.append(('resolve_dataset', locator_path))

@@ -81,12 +81,10 @@ def parse_location(path: str, *, configured_host: str | None = None, configured_
 
 
 def strip_protocol(path: str) -> str:
-    """Remove the Niyān protocol and authority for fsspec URL handling."""
+    """Preserve canonical URLs so a filesystem instance retains their authority."""
 
     if path.startswith('niyan://'):
-        parsed = urlsplit(path)
-        suffix = f'?{parsed.query}' if parsed.query else ''
-        return f'{parsed.path.strip("/")}{suffix}'
+        return path
     if path.startswith('niyan::'):
         return path[len('niyan::') :]
     return path

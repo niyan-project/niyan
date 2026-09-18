@@ -225,6 +225,27 @@ class ApiClient:
         query = urlencode({'revision': revision, 'path': path})
         return self.request('GET', f'/api/v1/datasets/{dataset_id}/repository/blob?{query}')
 
+    def authorize_repository_download(self, dataset_id, *, revision, path):
+        """Request one short-lived file download action.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Immutable dataset UUID.
+        revision : str
+            Exact Git commit selected for the operation.
+        path : str
+            Repository-relative file path.
+
+        Returns
+        -------
+        tuple[int, dict]
+            HTTP status and authorized Git or LFS transfer action.
+        """
+
+        query = urlencode({'revision': revision, 'path': path})
+        return self.request('GET', f'/api/v1/datasets/{dataset_id}/repository/download?{query}')
+
     def resolve_namespace(self, namespace_path):
         """Resolve a human-facing namespace path to immutable identity.
 

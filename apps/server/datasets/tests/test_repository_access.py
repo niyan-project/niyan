@@ -173,6 +173,22 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertEqual(lfs_raw_response.status_code, 409)
         self.assertEqual(lfs_raw_response.json()['code'], 'lfs_content_unavailable')
 
+    def test_raw_git_blob_supports_bounded_and_suffix_ranges(self):
+        """Return standard single-range responses without buffering the blob."""
+
+        bounded = self.client.get(self.repository_url('blob/raw'), {'path': 'notes.txt'}, HTTP_RANGE='bytes=2-7')
+        suffix = self.client.get(self.repository_url('blob/raw'), {'path': 'notes.txt'}, HTTP_RANGE='bytes=-4')
+        invalid = self.client.get(self.repository_url('blob/raw'), {'path': 'notes.txt'}, HTTP_RANGE='bytes=99-100')
+
+        self.assertEqual(bounded.status_code, 206)
+        self.assertEqual(b''.join(bounded.streaming_content), b'cond v')
+        self.assertEqual(bounded['Content-Range'], 'bytes 2-7/15')
+        self.assertEqual(bounded['Accept-Ranges'], 'bytes')
+        self.assertEqual(suffix.status_code, 206)
+        self.assertEqual(b''.join(suffix.streaming_content), b'ion\n')
+        self.assertEqual(invalid.status_code, 416)
+        self.assertEqual(invalid['Content-Range'], 'bytes */15')
+
     def test_browser_download_action_uses_git_or_direct_lfs_storage(self):
         """Keep ordinary downloads same-origin while sending LFS bytes to S3."""
 
@@ -195,7 +211,7 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertEqual(git_response.json()['resolved_commit'], self.main_commit)
         self.assertEqual(git_response.json()['object_id'], self.run_git('-C', self.working_directory.name, 'rev-parse', 'HEAD:notes.txt').stdout.strip())
         self.assertIsNone(git_response.json()['lfs_object_id'])
-        self.assertFalse(git_response.json()['range_supported'])
+        self.assertTrue(git_response.json()['range_supported'])
         self.assertEqual(lfs_response.status_code, 200)
         self.assertEqual(lfs_response.json()['storage'], 'lfs')
         self.assertEqual(lfs_response.json()['url'], action.url)
