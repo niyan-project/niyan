@@ -79,6 +79,10 @@ class TreeEntryResponse(Schema):
     object_type: str
     object_id: str
     size: int | None
+    git_blob_size: int | None
+    is_lfs: bool
+    lfs_object_id: str | None
+    lfs_size: int | None
 
 
 class TreeListResponse(Schema):

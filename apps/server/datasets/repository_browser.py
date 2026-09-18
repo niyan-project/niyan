@@ -197,7 +197,7 @@ class RepositoryBrowser:
         normalized_path = _normalize_path(path, allow_empty=True)
         treeish = resolved_commit if not normalized_path else f'{resolved_commit}:{normalized_path}'
         records = self._read_nul_records(['ls-tree', '-l', '-z', treeish], maximum=offset + limit + 1, missing_error=RepositoryPathNotFound)
-        entries = []
+        parsed_entries = []
         for record in records[offset:]:
             try:
                 metadata, name = record.split(b'\t', 1)
@@ -205,6 +205,12 @@ class RepositoryBrowser:
             except ValueError as error:
                 raise RepositoryBrowseError('Git returned malformed tree metadata.') from error
             decoded_name = name.decode('utf-8', errors='replace')
+            git_blob_size = int(size) if size != '-' else None
+            parsed_entries.append((decoded_name, mode, object_type, object_id, git_blob_size))
+        lfs_metadata = self._get_lfs_metadata_batch([(object_id, size) for _, _, object_type, object_id, size in parsed_entries if object_type == 'blob' and size is not None and size <= 1024])
+        entries = []
+        for decoded_name, mode, object_type, object_id, git_blob_size in parsed_entries:
+            lfs_object_id, lfs_size = lfs_metadata.get(object_id, (None, None))
             entries.append(
                 {
                     'name': decoded_name,
@@ -212,7 +218,11 @@ class RepositoryBrowser:
                     'mode': mode,
                     'object_type': object_type,
                     'object_id': object_id,
-                    'size': int(size) if size != '-' else None,
+                    'size': lfs_size if lfs_size is not None else git_blob_size,
+                    'git_blob_size': git_blob_size,
+                    'is_lfs': lfs_object_id is not None,
+                    'lfs_object_id': lfs_object_id,
+                    'lfs_size': lfs_size,
                 }
             )
         has_more = len(entries) > limit
@@ -244,12 +254,68 @@ class RepositoryBrowser:
         if type_result.stdout.strip() != b'blob':
             raise RepositoryPathNotFound('The requested path is not a file.')
         size = int(self._run(['cat-file', '-s', object_id]).stdout.strip())
-        lfs_object_id = None
-        lfs_size = None
-        if size <= 1024:
-            pointer = self._run(['cat-file', 'blob', object_id], maximum_output=1024).stdout.decode('utf-8', errors='replace')
-            lfs_object_id, lfs_size = _parse_lfs_pointer(pointer)
+        lfs_object_id, lfs_size = self._get_lfs_metadata(object_id=object_id, size=size)
         return resolved_commit, BlobMetadata(path=normalized_path, object_id=object_id, size=size, lfs_object_id=lfs_object_id, lfs_size=lfs_size)
+
+    def _get_lfs_metadata(self, *, object_id, size):
+        """Parse a small Git blob when it may be a standard LFS pointer.
+
+        Parameters
+        ----------
+        object_id : str
+            Immutable Git blob identifier.
+        size : int or None
+            Git-resident blob size.
+
+        Returns
+        -------
+        tuple[str or None, int or None]
+            LFS SHA-256 identifier and logical size when the blob is a pointer.
+        """
+
+        if size is None or size > 1024:
+            return None, None
+        pointer = self._run(['cat-file', 'blob', object_id], maximum_output=1024).stdout.decode('utf-8', errors='replace')
+        return _parse_lfs_pointer(pointer)
+
+    def _get_lfs_metadata_batch(self, candidates):
+        """Parse possible LFS pointers through one bounded Git batch process.
+
+        Parameters
+        ----------
+        candidates : list[tuple[str, int]]
+            Small Git blobs that may contain LFS pointers.
+
+        Returns
+        -------
+        dict[str, tuple[str or None, int or None]]
+            Candidate object IDs mapped to parsed LFS metadata.
+        """
+
+        if not candidates:
+            return {}
+        unique_candidates = dict(candidates)
+        standard_input = ''.join(f'{object_id}\n' for object_id in unique_candidates).encode()
+        maximum_output = sum(size + 128 for size in unique_candidates.values())
+        output = self._run(['cat-file', '--batch'], standard_input=standard_input, maximum_output=maximum_output).stdout
+        offset = 0
+        metadata = {}
+        for expected_object_id, expected_size in unique_candidates.items():
+            header_end = output.find(b'\n', offset)
+            if header_end < 0:
+                raise RepositoryBrowseError('Git returned malformed batch metadata.')
+            try:
+                object_id, object_type, encoded_size = output[offset:header_end].decode().split()
+                size = int(encoded_size)
+            except (UnicodeDecodeError, ValueError) as error:
+                raise RepositoryBrowseError('Git returned malformed batch metadata.') from error
+            content_start = header_end + 1
+            content_end = content_start + size
+            if object_id != expected_object_id or object_type != 'blob' or size != expected_size or output[content_end : content_end + 1] != b'\n':
+                raise RepositoryBrowseError('Git returned inconsistent batch metadata.')
+            metadata[object_id] = _parse_lfs_pointer(output[content_start:content_end].decode('utf-8', errors='replace'))
+            offset = content_end + 1
+        return metadata
 
     def open_blob(self, *, revision, path):
         """Open one ordinary Git blob as a streaming child-process response.
@@ -307,7 +373,7 @@ class RepositoryBrowser:
         content = self._run(['cat-file', 'blob', metadata.object_id], maximum_output=README_MAX_BYTES).stdout.decode('utf-8', errors='replace')
         return resolved_commit, metadata, content
 
-    def _run(self, arguments, *, check=True, maximum_output=4 * 1024 * 1024):
+    def _run(self, arguments, *, check=True, maximum_output=4 * 1024 * 1024, standard_input=None):
         """Run a bounded, non-shell Git read command.
 
         Parameters
@@ -318,6 +384,8 @@ class RepositoryBrowser:
             Treat a non-zero exit status as an unavailable repository.
         maximum_output : int, optional
             Maximum captured standard-output bytes.
+        standard_input : bytes, optional
+            Bounded bytes supplied to Git standard input.
 
         Returns
         -------
@@ -326,7 +394,7 @@ class RepositoryBrowser:
         """
 
         try:
-            result = subprocess.run(self._command(arguments), check=False, capture_output=True, timeout=30, env=self._environment())
+            result = subprocess.run(self._command(arguments), input=standard_input, check=False, capture_output=True, timeout=30, env=self._environment())
         except (OSError, subprocess.SubprocessError) as error:
             raise RepositoryBrowseError('The repository could not be read.') from error
         if len(result.stdout) > maximum_output:

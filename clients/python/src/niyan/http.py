@@ -149,6 +149,82 @@ class ApiClient:
         query = urlencode({'path': dataset_path})
         return self.request('GET', f'/api/v1/datasets/resolve?{query}')
 
+    def capabilities(self):
+        """Return installation API and filesystem compatibility metadata.
+
+        Returns
+        -------
+        tuple[int, dict]
+            HTTP status and advertised capabilities.
+        """
+
+        return self.request('GET', '/api/v1/capabilities')
+
+    def resolve_revision(self, dataset_id, *, revision=None):
+        """Resolve a branch, tag, or commit expression to an exact commit.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Immutable dataset UUID.
+        revision : str, optional
+            Caller-selected Git revision, or the dataset default when omitted.
+
+        Returns
+        -------
+        tuple[int, dict]
+            HTTP status and exact revision metadata.
+        """
+
+        query = f'?{urlencode({"revision": revision})}' if revision is not None else ''
+        return self.request('GET', f'/api/v1/datasets/{dataset_id}/repository/revisions/resolve{query}')
+
+    def list_repository_tree(self, dataset_id, *, revision, path='', limit=100, offset=0):
+        """List one page of a repository directory at an exact commit.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Immutable dataset UUID.
+        revision : str
+            Exact Git commit selected for the operation.
+        path : str, optional
+            Repository-relative directory path.
+        limit : int, optional
+            Maximum direct children to return.
+        offset : int, optional
+            Ordered children to skip.
+
+        Returns
+        -------
+        tuple[int, dict]
+            HTTP status and repository tree page.
+        """
+
+        query = urlencode({'revision': revision, 'path': path, 'limit': limit, 'offset': offset})
+        return self.request('GET', f'/api/v1/datasets/{dataset_id}/repository/tree?{query}')
+
+    def get_repository_blob(self, dataset_id, *, revision, path):
+        """Return logical metadata for one repository file.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Immutable dataset UUID.
+        revision : str
+            Exact Git commit selected for the operation.
+        path : str
+            Repository-relative file path.
+
+        Returns
+        -------
+        tuple[int, dict]
+            HTTP status and Git/LFS blob metadata.
+        """
+
+        query = urlencode({'revision': revision, 'path': path})
+        return self.request('GET', f'/api/v1/datasets/{dataset_id}/repository/blob?{query}')
+
     def resolve_namespace(self, namespace_path):
         """Resolve a human-facing namespace path to immutable identity.
 

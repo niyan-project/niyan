@@ -329,6 +329,9 @@ class Configuration:
                     return binding
         if dataset_path:
             encoded_binding = datasets.get(dataset_path) if isinstance(datasets, dict) else None
+            if encoded_binding is None and isinstance(datasets, dict):
+                matching_paths = [configured_path for configured_path in datasets if dataset_path.startswith(f'{configured_path}/')]
+                encoded_binding = datasets[max(matching_paths, key=len)] if matching_paths else None
             if encoded_binding is not None:
                 return CredentialBinding.from_dict(encoded_binding)
         if not include_default:

@@ -5,11 +5,15 @@ description = "Niyān CLI and Python filesystem client"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fsspec>=2025.3.0",
     "keyring>=25.6.0",
 ]
 
 [project.scripts]
 niyan = "niyan.cli:main"
+
+[project.entry-points."fsspec.specs"]
+niyan = "niyan.filesystem:NiyanFileSystem"
 
 [build-system]
 requires = ["hatchling"]

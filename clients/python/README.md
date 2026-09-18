@@ -2,7 +2,7 @@
 
 This package provides the `niyan` command and the importable Python client for Niyān.
 
-The CLI is the supported interface for authenticating to a Niyān installation and coordinating dataset repository workflows. The filesystem module will provide read-only, `fsspec`-compatible streaming and downloading without invoking CLI commands or requiring Git.
+The CLI is the recommended interface for authenticating to a Niyān installation and coordinating dataset repository workflows. The `niyan.filesystem` module provides a registered, read-only `fsspec` filesystem without invoking CLI commands or requiring Git. Its metadata surface supports `ls`, `info`, `exists`, `isfile`, and `isdir` through canonical URLs such as `niyan://data.example.edu/lab/images/path/to/file?revision=main`; streaming and download methods are implemented in the subsequent Phase 4 slices.
 
 Repository commands require Git on `PATH`, and commands that materialize large-file content also require Git LFS. Niyān configures and delegates to both tools; standard Git and Git LFS commands are also supported for users who prefer them. Dataset clones made through Niyān use depth-one, single-branch Git history by default; `niyan fetch` leaves the worktree and LFS cache unchanged, while `niyan pull` permits only fast-forward updates and then materializes the saved `--include`/`--exclude` selection. `--metadata-only` leaves LFS paths as pointer files for that invocation, and `--full-history` explicitly converts a shallow checkout to complete history.
 

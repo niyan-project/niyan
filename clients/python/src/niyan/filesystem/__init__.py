@@ -1,6 +1,15 @@
-"""Read-only filesystem integration for Niyān datasets.
+"""Read-only fsspec integration for Niyān datasets."""
 
-The public filesystem implementation will be added in a later reviewed stage.
-Importing this module intentionally performs no configuration, credential, Git,
-or network discovery.
-"""
+from niyan.filesystem.core import NiyanFileSystem
+from niyan.filesystem.errors import NiyanAuthenticationError, NiyanCompatibilityError, NiyanFileSystemError, NiyanIntegrityError, NiyanNotFoundError, NiyanPermissionError, NiyanTransferError
+
+__all__ = [
+    'NiyanAuthenticationError',
+    'NiyanCompatibilityError',
+    'NiyanFileSystem',
+    'NiyanFileSystemError',
+    'NiyanIntegrityError',
+    'NiyanNotFoundError',
+    'NiyanPermissionError',
+    'NiyanTransferError',
+]
