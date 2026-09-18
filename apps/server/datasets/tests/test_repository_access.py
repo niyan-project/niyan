@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.test import Client, LiveServerTestCase, RequestFactory, SimpleTestCase, TestCase, override_settings
@@ -14,6 +15,7 @@ from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
 from datasets.git_http import GitHttpBackend, RECEIVE_PACK
 from datasets.models import Dataset, DatasetGrant, LfsObject
+from datasets.object_storage import PresignedAction
 from datasets.services import create_dataset
 from namespaces.models import NamespaceMembership
 
@@ -135,12 +137,38 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertFalse(metadata_response.json()['is_lfs'])
         self.assertEqual(raw_response.status_code, 200)
         self.assertEqual(b''.join(raw_response.streaming_content), b'second version\n')
+        self.assertEqual(raw_response['Content-Disposition'], 'attachment; filename="notes.txt"')
         self.assertEqual(raw_response['X-Niyan-Resolved-Commit'], self.main_commit)
         self.assertTrue(lfs_metadata_response.json()['is_lfs'])
         self.assertEqual(lfs_metadata_response.json()['lfs_object_id'], self.lfs_object_id)
         self.assertEqual(lfs_metadata_response.json()['lfs_size'], 123456)
         self.assertEqual(lfs_raw_response.status_code, 409)
         self.assertEqual(lfs_raw_response.json()['code'], 'lfs_content_unavailable')
+
+    def test_browser_download_action_uses_git_or_direct_lfs_storage(self):
+        """Keep ordinary downloads same-origin while sending LFS bytes to S3."""
+
+        git_response = self.client.get(self.repository_url('download'), {'path': 'notes.txt'})
+        LfsObject.objects.create(
+            dataset=self.dataset,
+            oid=self.lfs_object_id,
+            size=123456,
+            state=LfsObject.State.AVAILABLE,
+            verification_method=LfsObject.VerificationMethod.SIZE,
+            available_at=timezone.now(),
+        )
+        action = PresignedAction(method='GET', url='https://objects.example.test/signed', headers={}, expires_in=300)
+        with patch('datasets.repository_api.issue_download_action', return_value=action):
+            lfs_response = self.client.get(self.repository_url('download'), {'path': 'large.bin'})
+
+        self.assertEqual(git_response.status_code, 200)
+        self.assertEqual(git_response.json()['storage'], 'git')
+        self.assertIn('/repository/blob/raw?', git_response.json()['url'])
+        self.assertEqual(git_response.json()['resolved_commit'], self.main_commit)
+        self.assertEqual(lfs_response.status_code, 200)
+        self.assertEqual(lfs_response.json()['storage'], 'lfs')
+        self.assertEqual(lfs_response.json()['url'], action.url)
+        self.assertEqual(lfs_response.json()['size'], 123456)
 
     def test_repository_browsing_requires_repository_scope_for_bearer_token(self):
         """Keep API metadata scopes separate from repository-content scopes."""

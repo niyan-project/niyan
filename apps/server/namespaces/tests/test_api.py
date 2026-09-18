@@ -52,3 +52,95 @@ class NamespaceApiTests(TestCase):
         response = self.client.get('/api/v1/namespaces/resolve', {'path': 'researcher'})
 
         self.assertEqual(response.status_code, 401)
+
+    def test_user_can_create_root_and_nested_groups(self):
+        """Create browser-facing groups while retaining namespace identities."""
+
+        root_response = self.client.post('/api/v1/namespaces', {'name': 'Helix Lab', 'slug': 'Helix'}, content_type='application/json')
+        nested_response = self.client.post(
+            '/api/v1/namespaces',
+            {'name': 'Imaging', 'slug': 'Imaging', 'parent_id': root_response.json()['id']},
+            content_type='application/json',
+        )
+
+        self.assertEqual(root_response.status_code, 201, root_response.content)
+        self.assertEqual(root_response.json()['path'], 'helix')
+        self.assertEqual(root_response.json()['role'], 'owner')
+        self.assertEqual(nested_response.status_code, 201, nested_response.content)
+        self.assertEqual(nested_response.json()['path'], 'helix/imaging')
+        self.assertTrue(NamespaceMembership.objects.filter(namespace_id=nested_response.json()['id'], user=self.user, role='owner').exists())
+
+    def test_browser_group_mutation_requires_csrf(self):
+        """Protect group administration performed with a browser session."""
+
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.user)
+
+        response = csrf_client.post('/api/v1/namespaces', {'name': 'Helix Lab', 'slug': 'helix'}, content_type='application/json')
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Namespace.objects.filter(kind=Namespace.Kind.GROUP).exists())
+
+    def test_visible_namespace_list_includes_personal_and_groups(self):
+        """Supply the dashboard with personal and group navigation entries."""
+
+        group = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Laboratory', slug='lab')
+        NamespaceMembership.objects.create(namespace=group, user=self.user, role=NamespaceMembership.Role.READER)
+
+        response = self.client.get('/api/v1/namespaces')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['path'] for item in response.json()['items']], ['lab', 'researcher'])
+
+    def test_group_owner_can_rename_and_delete_empty_group(self):
+        """Expose mutable group paths and irreversible empty-group deletion."""
+
+        group = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Laboratory', slug='lab')
+        NamespaceMembership.objects.create(namespace=group, user=self.user, role=NamespaceMembership.Role.OWNER)
+
+        update_response = self.client.patch(f'/api/v1/namespaces/{group.id}', {'name': 'Renamed Lab', 'slug': 'renamed'}, content_type='application/json')
+        delete_response = self.client.delete(f'/api/v1/namespaces/{group.id}')
+
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+        self.assertEqual(update_response.json()['path'], 'renamed')
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertFalse(Namespace.objects.filter(pk=group.pk).exists())
+
+    def test_group_with_children_cannot_be_deleted(self):
+        """Require owners to empty a group before permanent deletion."""
+
+        group = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Laboratory', slug='lab')
+        NamespaceMembership.objects.create(namespace=group, user=self.user, role=NamespaceMembership.Role.OWNER)
+        Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Imaging', slug='imaging', parent=group)
+
+        response = self.client.delete(f'/api/v1/namespaces/{group.id}')
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'group_not_empty')
+
+    def test_group_membership_crud_preserves_last_direct_owner(self):
+        """Manage direct members without allowing an ownerless group."""
+
+        group = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Laboratory', slug='lab')
+        owner_membership = NamespaceMembership.objects.create(namespace=group, user=self.user, role=NamespaceMembership.Role.OWNER)
+        colleague = User.objects.create_user(username='colleague')
+
+        create_response = self.client.post(
+            f'/api/v1/namespaces/{group.id}/memberships',
+            {'user_id': colleague.id, 'role': 'reader'},
+            content_type='application/json',
+        )
+        membership_id = create_response.json()['id']
+        update_response = self.client.patch(
+            f'/api/v1/namespaces/{group.id}/memberships/{membership_id}',
+            {'role': 'maintainer'},
+            content_type='application/json',
+        )
+        last_owner_response = self.client.delete(f'/api/v1/namespaces/{group.id}/memberships/{owner_membership.id}')
+        delete_response = self.client.delete(f'/api/v1/namespaces/{group.id}/memberships/{membership_id}')
+
+        self.assertEqual(create_response.status_code, 201, create_response.content)
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()['role'], 'maintainer')
+        self.assertEqual(last_owner_response.status_code, 409)
+        self.assertEqual(delete_response.status_code, 204)

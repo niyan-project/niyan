@@ -56,6 +56,7 @@ class DatasetApiTests(TestCase):
             'namespace_id': str(self.user.personal_namespace.id),
             'slug': 'Images',
             'name': 'Research Images',
+            'description': 'Training and validation images.',
         }
         payload.update(overrides)
         return self.client.post('/api/v1/datasets', payload, content_type='application/json')
@@ -76,6 +77,7 @@ class DatasetApiTests(TestCase):
                 'namespace_path': 'researcher',
                 'slug': 'images',
                 'name': 'Research Images',
+                'description': 'Training and validation images.',
                 'default_branch': 'main',
                 'role': 'owner',
             },
@@ -243,7 +245,7 @@ class DatasetApiTests(TestCase):
         created = self.post_dataset().json()
         repository_path = self.repository_root / f"{created['id']}.git"
 
-        response = self.client.patch(f"/api/v1/datasets/{created['id']}", {'slug': 'Microscopy', 'name': 'Microscopy Images'}, content_type='application/json')
+        response = self.client.patch(f"/api/v1/datasets/{created['id']}", {'slug': 'Microscopy', 'name': 'Microscopy Images', 'description': 'Confocal microscopy captures.'}, content_type='application/json')
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -251,9 +253,21 @@ class DatasetApiTests(TestCase):
         self.assertEqual(body['namespace_path'], 'researcher')
         self.assertEqual(body['slug'], 'microscopy')
         self.assertEqual(body['name'], 'Microscopy Images')
+        self.assertEqual(body['description'], 'Confocal microscopy captures.')
         self.assertTrue(repository_path.is_dir())
         dataset = Dataset.objects.get()
         self.assertEqual(dataset.path, 'researcher/microscopy')
+
+    def test_update_dataset_can_clear_description(self):
+        """Treat the optional description as mutable presentation metadata."""
+
+        created = self.post_dataset().json()
+
+        response = self.client.patch(f"/api/v1/datasets/{created['id']}", {'description': ''}, content_type='application/json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['description'], '')
+        self.assertEqual(Dataset.objects.get(pk=created['id']).description, '')
 
     def test_update_dataset_reports_conflicting_path(self):
         """Reject a rename that would collide with another dataset."""

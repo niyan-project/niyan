@@ -20,6 +20,7 @@ from django.urls import path
 from datasets.git_http import git_http_backend
 from datasets.lfs_http import lfs_batch, lfs_verify
 from project.api import api
+from project.web import spa_entry
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -28,4 +29,6 @@ urlpatterns = [
     path('git/<uuid:dataset_id>.git/info/lfs/objects/<str:oid>/verify', lfs_verify, name='git-lfs-verify'),
     path('git/<uuid:dataset_id>.git', git_http_backend, name='git-dataset-root'),
     path('git/<uuid:dataset_id>.git/<path:git_path>', git_http_backend, name='git-dataset'),
+    path('', spa_entry, name='web-app-root'),
+    path('<path:route>', spa_entry, name='web-app-route'),
 ]

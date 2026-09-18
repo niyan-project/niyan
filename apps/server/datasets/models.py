@@ -17,6 +17,7 @@ class Dataset(models.Model):
     namespace = models.ForeignKey(Namespace, on_delete=models.PROTECT, related_name='datasets')
     slug = models.CharField(max_length=100, validators=[path_slug_validator])
     name = models.CharField(max_length=255)
+    description = models.CharField(max_length=500, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='created_datasets')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

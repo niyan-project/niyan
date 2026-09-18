@@ -91,6 +91,22 @@ def can_create_dataset(*, user, namespace):
     return _at_least(get_namespace_role(user=user, namespace=namespace), NamespaceMembership.Role.MAINTAINER)
 
 
+def can_create_group(*, user, parent=None):
+    """Return whether a user may create a root or nested Niyān group."""
+
+    if not user.is_authenticated:
+        return False
+    if parent is None:
+        return True
+    return _at_least(get_namespace_role(user=user, namespace=parent), NamespaceMembership.Role.OWNER)
+
+
+def can_manage_group(*, user, namespace):
+    """Return whether a user may update a group and its direct members."""
+
+    return namespace.kind == Namespace.Kind.GROUP and _at_least(get_namespace_role(user=user, namespace=namespace), NamespaceMembership.Role.OWNER)
+
+
 def can_read_dataset(*, user, dataset):
     """Return whether a user may view metadata and repository content."""
 

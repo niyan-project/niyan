@@ -3,9 +3,14 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 from django.conf import settings
+from django.contrib.auth import authenticate, get_user_model, login, logout, update_session_auth_hash
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.db.models import Q
+from django.middleware.csrf import CsrfViewMiddleware, get_token
 from django.utils import timezone
-from ninja import Field, Router, Schema, Status
+from ninja import Field, Query, Router, Schema, Status
 from ninja.security import django_auth
 from ninja.throttling import AnonRateThrottle, UserRateThrottle
 
@@ -80,8 +85,52 @@ class CurrentUserResponse(Schema):
 
     id: int
     username: str
+    display_name: str
+    email: str
+    is_superuser: bool
     authentication_method: str
     access_token: AccessTokenMetadataResponse | None
+
+
+class SessionLoginInput(Schema):
+    """Carry credentials for one same-origin browser session."""
+
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class EmailChangeInput(Schema):
+    """Confirm the current password before replacing an account email."""
+
+    current_password: str = Field(min_length=1, max_length=1024)
+    email: str = Field(max_length=254)
+
+
+class PasswordChangeInput(Schema):
+    """Carry current and replacement credentials for a password change."""
+
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=1, max_length=1024)
+
+
+class CsrfResponse(Schema):
+    """Return the token mirrored in Django's CSRF cookie."""
+
+    csrf_token: str
+
+
+class UserSearchItemResponse(Schema):
+    """Expose one active user as an access-management candidate."""
+
+    id: int
+    username: str
+    display_name: str
+
+
+class UserSearchResponse(Schema):
+    """Return bounded active-user search results."""
+
+    items: list[UserSearchItemResponse]
 
 
 class DeviceAuthorizationStartInput(Schema):
@@ -205,6 +254,64 @@ def serialize_access_token(access_token):
     }
 
 
+def serialize_current_user(user, *, authentication_method='session', access_token=None):
+    """Convert one authenticated user into browser-safe account state."""
+
+    return {
+        'id': user.id,
+        'username': user.username,
+        'display_name': user.get_full_name().strip() or user.username,
+        'email': user.email,
+        'is_superuser': user.is_superuser,
+        'authentication_method': authentication_method,
+        'access_token': serialize_access_token(access_token) if access_token is not None else None,
+    }
+
+
+def passes_csrf_check(request):
+    """Apply Django's CSRF validator inside an anonymous Ninja operation."""
+
+    middleware = CsrfViewMiddleware(lambda checked_request: None)
+    return middleware.process_view(request, lambda checked_request: None, (), {}) is None
+
+
+@router.get('/csrf', auth=None, response={200: CsrfResponse})
+def get_csrf_token_endpoint(request):
+    """Initialize the same-origin CSRF cookie before browser mutation."""
+
+    return {'csrf_token': get_token(request)}
+
+
+@router.post('/session', auth=None, response={200: CurrentUserResponse, 401: ErrorResponse, 403: ErrorResponse})
+def create_session_endpoint(request, payload: SessionLoginInput):
+    """Authenticate an existing active user into a Django browser session."""
+
+    if not passes_csrf_check(request):
+        return Status(403, {'code': 'csrf_failed', 'detail': 'The CSRF token is missing or invalid.'})
+    user = authenticate(request, username=payload.username, password=payload.password)
+    if user is None or not user.is_active:
+        return Status(401, {'code': 'invalid_credentials', 'detail': 'The username or password is incorrect.'})
+    login(request, user)
+    return serialize_current_user(user)
+
+
+@router.delete('/session', auth=django_auth, response={204: None, 401: ErrorResponse})
+def delete_session_endpoint(request):
+    """End the current Django browser session."""
+
+    logout(request)
+    return Status(204, None)
+
+
+@router.get('/users', auth=django_auth, response={200: UserSearchResponse, 401: ErrorResponse, 422: ErrorResponse})
+def search_users_endpoint(request, query: str = Query(..., min_length=2, max_length=100), limit: int = Query(20, ge=1, le=20)):
+    """Search active users for group memberships and dataset grants."""
+
+    normalized_query = query.strip()
+    users = get_user_model().objects.filter(is_active=True).filter(Q(username__icontains=normalized_query) | Q(first_name__icontains=normalized_query) | Q(last_name__icontains=normalized_query)).order_by('username', 'id')[:limit]
+    return {'items': [{'id': user.id, 'username': user.username, 'display_name': user.get_full_name().strip() or user.username} for user in users]}
+
+
 @router.get('/tokens', auth=django_auth, response={200: AccessTokenListResponse, 401: ErrorResponse})
 def list_access_tokens_endpoint(request):
     """List every access token issued to the browser user."""
@@ -260,12 +367,43 @@ def get_current_user_endpoint(request):
     """Inspect the authenticated user and optional bearer-token metadata."""
 
     access_token = get_access_token(request)
-    return {
-        'id': request.auth.id,
-        'username': request.auth.username,
-        'authentication_method': 'access_token' if access_token is not None else 'session',
-        'access_token': serialize_access_token(access_token) if access_token is not None else None,
-    }
+    return serialize_current_user(request.auth, authentication_method='access_token' if access_token is not None else 'session', access_token=access_token)
+
+
+@router.patch('/me/email', auth=django_auth, response={200: CurrentUserResponse, 400: ErrorResponse, 401: ErrorResponse, 422: ErrorResponse})
+def change_email_endpoint(request, payload: EmailChangeInput):
+    """Replace the browser user's email after checking their password."""
+
+    if not request.auth.check_password(payload.current_password):
+        return Status(400, {'code': 'invalid_current_password', 'detail': 'The current password is incorrect.'})
+
+    email = get_user_model().objects.normalize_email(payload.email.strip())
+    try:
+        validate_email(email)
+    except ValidationError:
+        return Status(422, {'code': 'validation_error', 'detail': 'Enter a valid email address.'})
+
+    request.auth.email = email
+    request.auth.save(update_fields=['email'])
+    return serialize_current_user(request.auth)
+
+
+@router.patch('/me/password', auth=django_auth, response={204: None, 400: ErrorResponse, 401: ErrorResponse, 422: ErrorResponse})
+def change_password_endpoint(request, payload: PasswordChangeInput):
+    """Replace the browser user's password while retaining this session."""
+
+    if not request.auth.check_password(payload.current_password):
+        return Status(400, {'code': 'invalid_current_password', 'detail': 'The current password is incorrect.'})
+
+    try:
+        validate_password(payload.new_password, user=request.auth)
+    except ValidationError:
+        return Status(422, {'code': 'validation_error', 'detail': 'The new password does not meet this installation\'s password requirements.'})
+
+    request.auth.set_password(payload.new_password)
+    request.auth.save(update_fields=['password'])
+    update_session_auth_hash(request, request.auth)
+    return Status(204, None)
 
 
 @router.post('/device', auth=None, throttle=[device_start_throttle], response={201: DeviceAuthorizationStartResponse, 422: ErrorResponse, 429: ErrorResponse})

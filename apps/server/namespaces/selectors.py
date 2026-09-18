@@ -1,4 +1,4 @@
-from datasets.policies import can_view_namespace
+from datasets.policies import can_manage_group, can_view_namespace
 from namespaces.models import Namespace
 
 
@@ -29,3 +29,28 @@ def get_visible_namespace_by_path(*, namespace_path, user):
     if namespace is None or not can_view_namespace(user=user, namespace=namespace):
         return None
     return namespace
+
+
+def get_visible_namespace(*, namespace_id, user):
+    """Return one namespace by immutable identity when it is visible."""
+
+    namespace = Namespace.objects.select_related('parent', 'owner_user').filter(pk=namespace_id).first()
+    if namespace is None or not can_view_namespace(user=user, namespace=namespace):
+        return None
+    return namespace
+
+
+def get_manageable_group(*, namespace_id, user):
+    """Return one group only when the user has owner-level administration."""
+
+    namespace = Namespace.objects.select_related('parent').filter(pk=namespace_id, kind=Namespace.Kind.GROUP).first()
+    if namespace is None or not can_manage_group(user=user, namespace=namespace):
+        return None
+    return namespace
+
+
+def list_visible_namespaces(*, user):
+    """Return visible personal and group namespaces in deterministic path order."""
+
+    namespaces = Namespace.objects.select_related('parent', 'owner_user').order_by('slug', 'id')
+    return sorted((namespace for namespace in namespaces if can_view_namespace(user=user, namespace=namespace)), key=lambda namespace: (namespace.path, str(namespace.id)))

@@ -26,6 +26,7 @@ class DatasetCreateInput(Schema):
     namespace_id: UUID
     slug: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default='', max_length=500)
 
 
 class DatasetResponse(Schema):
@@ -36,6 +37,7 @@ class DatasetResponse(Schema):
     namespace_path: str
     slug: str
     name: str
+    description: str
     default_branch: str
     role: str
     created_at: datetime
@@ -64,6 +66,7 @@ class DatasetUpdateInput(Schema):
 
     slug: str | None = Field(default=None, min_length=1, max_length=100)
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode='after')
     def require_non_null_change(self) -> Self:
@@ -171,6 +174,7 @@ def serialize_dataset(dataset, *, user):
         'namespace_path': dataset.namespace.path,
         'slug': dataset.slug,
         'name': dataset.name,
+        'description': dataset.description,
         'default_branch': 'main',
         'role': get_dataset_role(user=user, dataset=dataset),
         'created_at': dataset.created_at,
@@ -227,7 +231,7 @@ def create_dataset_endpoint(request, payload: DatasetCreateInput):
         return Status(404, {'code': 'namespace_not_found', 'detail': 'The requested namespace does not exist.'})
 
     try:
-        dataset = create_dataset(namespace=namespace, slug=payload.slug, name=payload.name, created_by=request.auth)
+        dataset = create_dataset(namespace=namespace, slug=payload.slug, name=payload.name, description=payload.description, created_by=request.auth)
     except PermissionDenied:
         return Status(403, {'code': 'permission_denied', 'detail': 'You cannot create a dataset in this namespace.'})
     except (DatasetPathConflict, IntegrityError):
@@ -340,7 +344,7 @@ def update_dataset_endpoint(request, dataset_id: UUID, payload: DatasetUpdateInp
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
 
     try:
-        dataset = update_dataset(dataset=dataset, updated_by=request.auth, slug=payload.slug, name=payload.name)
+        dataset = update_dataset(dataset=dataset, updated_by=request.auth, slug=payload.slug, name=payload.name, description=payload.description)
     except PermissionDenied:
         # Missing and inaccessible datasets intentionally have the same public response.
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})

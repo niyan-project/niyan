@@ -1,11 +1,16 @@
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlencode
 from uuid import UUID
 
 from django.http import StreamingHttpResponse
+from django.utils.http import content_disposition_header
 from ninja import Query, Router, Schema, Status
 
 from accounts.authentication import require_access, session_or_access_token
+from datasets.lfs_transfers import LfsTransferUnavailable, issue_download_action
+from datasets.models import LfsObject
+from datasets.object_storage import ObjectStoreError
 from datasets.repository_browser import InvalidRepositoryInput, LfsContentUnavailable, RepositoryBrowseError, RepositoryBrowser, RepositoryPathNotFound, RevisionNotFound
 from datasets.selectors import get_visible_dataset
 
@@ -95,6 +100,19 @@ class ReadmeResponse(BlobMetadataResponse):
     """Return root README text together with exact blob metadata."""
 
     content: str
+
+
+class DownloadActionResponse(Schema):
+    """Authorize a browser download through Git or direct object storage."""
+
+    resolved_commit: str
+    path: str
+    size: int
+    storage: Literal['git', 'lfs']
+    method: str
+    url: str
+    headers: dict[str, str]
+    expires_in: int | None
 
 
 router = Router(tags=['repository'], auth=session_or_access_token)
@@ -210,6 +228,7 @@ def download_repository_blob_endpoint(request, dataset_id: UUID, path: str, revi
         resolved_commit, metadata, content = browser.open_blob(revision=revision, path=path)
         response = StreamingHttpResponse(content, content_type='application/octet-stream')
         response['Content-Length'] = str(metadata.size)
+        response['Content-Disposition'] = content_disposition_header(True, metadata.path.rsplit('/', 1)[-1])
         response['ETag'] = f'"{metadata.object_id}"'
         response['X-Niyan-Resolved-Commit'] = resolved_commit
         return response
@@ -221,6 +240,54 @@ def download_repository_blob_endpoint(request, dataset_id: UUID, path: str, revi
         return Status(404, {'code': 'path_not_found', 'detail': 'The requested repository path does not exist.'})
     except InvalidRepositoryInput:
         return Status(422, {'code': 'validation_error', 'detail': 'The repository request is invalid.'})
+    except RepositoryBrowseError:
+        return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be read.'})
+
+
+@router.get('/{dataset_id}/repository/download', response={200: DownloadActionResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse, 503: ErrorResponse})
+def authorize_repository_download_endpoint(request, dataset_id: UUID, path: str, revision: str = 'main'):
+    """Authorize a browser download without proxying Git LFS object bytes."""
+
+    try:
+        browser = get_browser(request, dataset_id)
+        if browser is None:
+            return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+        resolved_commit, metadata = browser.get_blob_metadata(revision=revision, path=path)
+        if metadata.lfs_object_id is None:
+            query = urlencode({'path': metadata.path, 'revision': resolved_commit})
+            return {
+                'resolved_commit': resolved_commit,
+                'path': metadata.path,
+                'size': metadata.size,
+                'storage': 'git',
+                'method': 'GET',
+                'url': request.build_absolute_uri(f'/api/v1/datasets/{dataset_id}/repository/blob/raw?{query}'),
+                'headers': {},
+                'expires_in': None,
+            }
+
+        lfs_object = LfsObject.objects.select_related('dataset').filter(dataset_id=dataset_id, oid=metadata.lfs_object_id, size=metadata.lfs_size, state__in=[LfsObject.State.AVAILABLE, LfsObject.State.REFERENCED]).first()
+        if lfs_object is None:
+            return Status(409, {'code': 'lfs_content_unavailable', 'detail': 'Git LFS content is not available yet.'})
+        action = issue_download_action(lfs_object=lfs_object)
+        return {
+            'resolved_commit': resolved_commit,
+            'path': metadata.path,
+            'size': metadata.lfs_size,
+            'storage': 'lfs',
+            'method': action.method,
+            'url': action.url,
+            'headers': action.headers,
+            'expires_in': action.expires_in,
+        }
+    except RevisionNotFound:
+        return Status(404, {'code': 'revision_not_found', 'detail': 'The requested revision does not exist.'})
+    except RepositoryPathNotFound:
+        return Status(404, {'code': 'path_not_found', 'detail': 'The requested repository path does not exist.'})
+    except InvalidRepositoryInput:
+        return Status(422, {'code': 'validation_error', 'detail': 'The repository request is invalid.'})
+    except (LfsTransferUnavailable, ObjectStoreError):
+        return Status(503, {'code': 'download_unavailable', 'detail': 'The download is temporarily unavailable.'})
     except RepositoryBrowseError:
         return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be read.'})
 

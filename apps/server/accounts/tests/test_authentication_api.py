@@ -228,6 +228,142 @@ class AccessTokenApiTests(TestCase):
         self.assertEqual(update_response.json()['name'], 'Updated')
 
 
+class BrowserSessionApiTests(TestCase):
+    """Verify same-origin browser login, CSRF, logout, and user discovery."""
+
+    def setUp(self):
+        """Create one active user with a known password."""
+
+        self.user = User.objects.create_user(username='researcher', password='correct horse battery staple', first_name='Ada', last_name='Lovelace')
+        self.client = Client(enforce_csrf_checks=True)
+
+    def csrf_token(self):
+        """Initialize and return the browser client's CSRF token."""
+
+        response = self.client.get('/api/v1/auth/csrf')
+        self.assertEqual(response.status_code, 200)
+        return response.json()['csrf_token']
+
+    def test_browser_login_requires_csrf_and_creates_session(self):
+        """Protect credential submission and return current account state."""
+
+        rejected = self.client.post('/api/v1/auth/session', {'username': 'researcher', 'password': 'correct horse battery staple'}, content_type='application/json')
+        token = self.csrf_token()
+        accepted = self.client.post(
+            '/api/v1/auth/session',
+            {'username': 'researcher', 'password': 'correct horse battery staple'},
+            content_type='application/json',
+            HTTP_X_CSRFTOKEN=token,
+        )
+        current = self.client.get('/api/v1/auth/me')
+
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.json()['display_name'], 'Ada Lovelace')
+        self.assertFalse(accepted.json()['is_superuser'])
+        self.assertEqual(current.status_code, 200)
+
+    def test_invalid_browser_credentials_do_not_create_session(self):
+        """Return one stable failure without revealing which credential failed."""
+
+        response = self.client.post(
+            '/api/v1/auth/session',
+            {'username': 'researcher', 'password': 'incorrect'},
+            content_type='application/json',
+            HTTP_X_CSRFTOKEN=self.csrf_token(),
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()['code'], 'invalid_credentials')
+
+    def test_browser_logout_requires_csrf_and_ends_session(self):
+        """Prevent cross-site logout and invalidate current-account state."""
+
+        self.client.force_login(self.user)
+        rejected = self.client.delete('/api/v1/auth/session')
+        token = self.csrf_token()
+        accepted = self.client.delete('/api/v1/auth/session', HTTP_X_CSRFTOKEN=token)
+        current = self.client.get('/api/v1/auth/me')
+
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(accepted.status_code, 204)
+        self.assertEqual(current.status_code, 401)
+
+    def test_browser_user_search_is_bounded_and_session_only(self):
+        """Support membership selectors without exposing users anonymously."""
+
+        anonymous = self.client.get('/api/v1/auth/users', {'query': 're'})
+        self.client.force_login(self.user)
+        authenticated = self.client.get('/api/v1/auth/users', {'query': 'ada'})
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(authenticated.status_code, 200)
+        self.assertEqual(authenticated.json()['items'][0]['username'], 'researcher')
+
+    def test_browser_user_can_change_email_after_password_confirmation(self):
+        """Update account email without weakening password confirmation or CSRF."""
+
+        self.client.force_login(self.user)
+        response = self.client.patch(
+            '/api/v1/auth/me/email',
+            {'current_password': 'correct horse battery staple', 'email': 'ada@example.test'},
+            content_type='application/json',
+            HTTP_X_CSRFTOKEN=self.csrf_token(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['email'], 'ada@example.test')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'ada@example.test')
+
+    def test_browser_email_change_rejects_wrong_password(self):
+        """Keep possession of an authenticated browser session insufficient alone."""
+
+        self.client.force_login(self.user)
+        response = self.client.patch(
+            '/api/v1/auth/me/email',
+            {'current_password': 'wrong password', 'email': 'ada@example.test'},
+            content_type='application/json',
+            HTTP_X_CSRFTOKEN=self.csrf_token(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['code'], 'invalid_current_password')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, '')
+
+    def test_browser_user_can_change_password_and_keep_current_session(self):
+        """Rotate the password while retaining the explicitly confirmed session."""
+
+        self.client.force_login(self.user)
+        response = self.client.patch(
+            '/api/v1/auth/me/password',
+            {'current_password': 'correct horse battery staple', 'new_password': 'a much newer horse battery staple'},
+            content_type='application/json',
+            HTTP_X_CSRFTOKEN=self.csrf_token(),
+        )
+        current = self.client.get('/api/v1/auth/me')
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(current.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('a much newer horse battery staple'))
+
+    def test_browser_password_change_requires_csrf(self):
+        """Reject cross-site credential rotation."""
+
+        self.client.force_login(self.user)
+        response = self.client.patch(
+            '/api/v1/auth/me/password',
+            {'current_password': 'correct horse battery staple', 'new_password': 'a much newer horse battery staple'},
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('correct horse battery staple'))
+
+
 class DeviceAuthorizationApiTests(TestCase):
     """Verify the browser-assisted CLI login protocol."""
 

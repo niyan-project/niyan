@@ -19,7 +19,7 @@ class DatasetObjectDeletionError(RuntimeError):
     """Report that dataset-owned object storage could not be removed safely."""
 
 
-def create_dataset(*, namespace, slug, name, created_by, repository_store=None):
+def create_dataset(*, namespace, slug, name, created_by, description='', repository_store=None):
     """Create a private dataset and its bare Git repository as one logical operation.
 
     Parameters
@@ -30,6 +30,8 @@ def create_dataset(*, namespace, slug, name, created_by, repository_store=None):
         Human-facing dataset path component.
     name : str
         Dataset display name.
+    description : str, optional
+        Short human-facing dataset summary.
     created_by : accounts.models.User
         Authenticated user requesting creation.
     repository_store : datasets.repositories.GitRepositoryStore, optional
@@ -64,7 +66,7 @@ def create_dataset(*, namespace, slug, name, created_by, repository_store=None):
             if locked_namespace.children.filter(slug=normalized_slug).exists() or locked_namespace.datasets.filter(slug=normalized_slug).exists():
                 raise DatasetPathConflict({'slug': 'This namespace path is already in use.'})
 
-            dataset = Dataset(namespace=locked_namespace, slug=normalized_slug, name=name, created_by=created_by)
+            dataset = Dataset(namespace=locked_namespace, slug=normalized_slug, name=name, description=description, created_by=created_by)
             dataset.full_clean()
             dataset.save()
             provisioned_repository = store.create(dataset.id)
@@ -76,7 +78,7 @@ def create_dataset(*, namespace, slug, name, created_by, repository_store=None):
         raise
 
 
-def update_dataset(*, dataset, updated_by, slug=None, name=None):
+def update_dataset(*, dataset, updated_by, slug=None, name=None, description=None):
     """Update a dataset's mutable human-facing details.
 
     Parameters
@@ -89,6 +91,8 @@ def update_dataset(*, dataset, updated_by, slug=None, name=None):
         Replacement path component.
     name : str, optional
         Replacement display name.
+    description : str, optional
+        Replacement short summary, including an empty string to clear it.
 
     Returns
     -------
@@ -120,6 +124,9 @@ def update_dataset(*, dataset, updated_by, slug=None, name=None):
 
         if name is not None:
             locked_dataset.name = name
+
+        if description is not None:
+            locked_dataset.description = description
 
         locked_dataset.full_clean()
         locked_dataset.save()

@@ -9,4 +9,5 @@ dependencies = [
     "django-environ>=0.14.0",
     "django-ninja>=1.7.0",
     "psycopg[binary]>=3.3.5",
+    "whitenoise>=6.11.0",
 ]

@@ -16,7 +16,7 @@ class DatasetAdmin(admin.ModelAdmin):
     """Expose dataset control-plane records to installation administrators."""
 
     list_display = ('path', 'name', 'created_by', 'created_at')
-    search_fields = ('name', 'slug', 'namespace__name', 'namespace__slug')
+    search_fields = ('name', 'description', 'slug', 'namespace__name', 'namespace__slug')
     inlines = (DatasetGrantInline,)
 
 
