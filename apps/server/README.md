@@ -18,8 +18,8 @@ The private bucket's CORS policy must allow the deployed web application's origi
 
 Run `uv run python manage.py run_lfs_maintenance` as a separate long-lived server process. It uses PostgreSQL records and row locks directly; Redis and Celery are not required. `--once` performs the same bounded reconciliation pass for explicit administration and testing. The default grace period for unreferenced uploads is seven days and the default worker interval is five minutes.
 
-The normal automated suite uses an isolated test HTTP object service and never requires public infrastructure. To explicitly smoke-test the configured private S3-compatible backend, run `NIYAN_RUN_S3_SMOKE_TEST=1 uv run python manage.py test datasets.tests.test_s3_smoke`. The test uploads, verifies, downloads, and deletes one tiny uniquely keyed object; it is skipped unless the opt-in variable is set.
+The normal automated suite uses an isolated test HTTP object service and never requires public infrastructure. Its CLI acceptance cases require Git and Git LFS and use `NIYAN_TEST_DATABASE_NAME` to select a file-backed SQLite test database when hook subprocesses need to share test state. To explicitly smoke-test the configured private S3-compatible backend, run `NIYAN_RUN_S3_SMOKE_TEST=1 uv run python manage.py test datasets.tests.test_s3_smoke`. The test uploads, verifies, downloads, and deletes one tiny uniquely keyed object; it is skipped unless the opt-in variable is set.
 
 ## System dependencies
 
-The server requires a Git installation that includes `git-http-backend`. Git initializes bare dataset repositories, serves smart-HTTP clone and fetch operations, and supplies authoritative repository metadata for the browsing API.
+The server requires a Git installation that includes `git-http-backend`. Git initializes bare dataset repositories, serves smart-HTTP clone and fetch operations, and supplies authoritative repository metadata for the browsing API. Running the complete acceptance suite also requires Git LFS because it exercises the supported CLI workflow against the live server boundary.
