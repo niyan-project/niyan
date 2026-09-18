@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** server, web, CLI, and API maintainers
-- **Last reviewed:** 2026-09-16
+- **Last reviewed:** 2026-09-18
 
 ## Purpose
 
@@ -26,6 +26,10 @@ A group namespace has no owning user and may be a root namespace or a child of a
 
 Users join group namespaces through Niyān namespace memberships. A membership records one of four role names: `owner`, `maintainer`, `contributor`, or `reader`. This specification defines their persistence and ordering vocabulary; the authorization specification must define their exact allowed operations before group access is exposed publicly.
 
+Any authenticated user may create a root group. The creator becomes a direct owner. An owner may create a nested group beneath that group; the nested group's creator likewise becomes a direct owner. A group must retain at least one direct owner, even when inherited ownership would otherwise provide access.
+
+Owners may rename a group, change its slug, manage direct memberships, and permanently delete it once it contains no child groups or datasets. Direct membership records may be created, assigned another role, or removed. Inherited membership is computed from ancestors and is never materialized as an editable membership in a descendant.
+
 A slug must be unique among the datasets and child namespaces directly beneath the same namespace. Root namespace slugs must be unique installation-wide. This shared path constraint prevents a path from ambiguously naming both a subgroup and a dataset.
 
 The full namespace path is derived from ancestor slugs. It is a mutable locator for people and Git remotes, not a persistent identifier. Moving or renaming a group changes its human-facing path while preserving all namespace and dataset UUIDs.
@@ -46,6 +50,7 @@ A dataset control-plane record must have:
 - a containing namespace;
 - a normalized lowercase slug;
 - a display name;
+- an optional short description;
 - the user who created it; and
 - creation and modification timestamps.
 
@@ -81,15 +86,17 @@ The service must reject an existing final repository path rather than adopting o
 
 ## Initial API Boundary
 
-The public API must be versioned under `/api/v1/`. Dataset creation accepts an immutable namespace UUID together with the dataset slug and display name. A successful response returns the immutable dataset and namespace UUIDs, current namespace path, slug, display name, initial default branch, caller's effective role, and creation timestamp.
+The public API must be versioned under `/api/v1/`. Dataset creation accepts an immutable namespace UUID together with the dataset slug, display name, and optional description of at most 500 characters. A successful response returns the immutable dataset and namespace UUIDs, current namespace path, slug, display name, description, initial default branch, caller's effective role, and creation timestamp.
 
-The endpoint must require an authenticated user and call the domain service rather than performing Git or filesystem work directly. The first implementation may allow creation only in the caller's personal namespace. Group role evaluation, scoped tokens, visibility changes, and protected-ref policy belong to the authorization specification and later stages.
+The endpoint must require an authenticated user and call the domain service rather than performing Git or filesystem work directly. Dataset creation is allowed in the caller's personal namespace or a group where the caller has at least maintainer access. Scoped tokens, visibility rules, and protected-ref policy are defined by their focused specifications.
 
 An authenticated user may retrieve a dataset in their personal namespace by immutable dataset UUID. They may also list datasets in their personal namespace by immutable namespace UUID using limit-and-offset pagination. Dataset lists are ordered by creation timestamp and then UUID so repeated requests have a deterministic order. The initial page limit must not exceed 100 datasets.
 
 Path-oriented clients may resolve a visible human-facing namespace path to its immutable UUID through `/api/v1/namespaces/resolve`. The general dataset list may omit `namespace_id` to return a paginated list of every dataset visible to the caller. These lookups apply the same visibility rules as dataset access and never expose inaccessible namespaces or datasets.
 
-An authenticated owner may update a dataset's display name, slug, or both. Changing a slug changes its human-facing path but does not change the dataset UUID or UUID-derived repository location. Empty updates, null values, invalid slugs, and conflicting namespace paths must be rejected.
+The namespace API lists visible personal namespaces and groups and exposes immutable-UUID operations to create, retrieve, update, and delete groups. Group owners may list, create, update, and delete direct memberships through child membership endpoints. Expected conflicts include an occupied group path, a non-empty group, a duplicate membership, and an operation that would remove or demote the final direct owner.
+
+An authenticated owner or maintainer may update a dataset's display name, slug, description, or any combination of those fields. An empty description clears it. Changing a slug changes its human-facing path but does not change the dataset UUID or UUID-derived repository location. Empty updates, null values, invalid slugs, overlong descriptions, and conflicting namespace paths must be rejected.
 
 An authenticated owner may permanently delete a dataset. Deletion is irreversible: the control-plane record and bare Git repository must be removed, and the same contract will apply to dataset-owned Git LFS objects when LFS storage is implemented. Confirmation of the exact dataset path belongs in interactive clients such as the web application; the authenticated API operation itself does not implement a confirmation prompt.
 

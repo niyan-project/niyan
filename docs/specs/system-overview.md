@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** maintainers, contributors, and early adopters
-- **Last reviewed:** 2026-09-17
+- **Last reviewed:** 2026-09-18
 
 ## Summary
 
@@ -78,6 +78,8 @@ The accepted [Git LFS and object-storage protocol](git-lfs-and-object-storage.md
 
 The Nuxt application provides a Git-forge-style dataset view with namespace navigation, a default README when present, tree browsing, breadcrumbs, commits, branches, tags, and file download. Format-specific previews come from installable viewer plugins rather than hard-coded core behavior.
 
+The web application is a client-rendered Nuxt 4 SPA distributed as static files under the same origin as Django. It uses Nuxt UI and Tailwind CSS, an Indigo primary color with neutral surfaces, and light, dark, and system-following appearances. The product has no public repositories, stars, followers, or other social-forge features in v1. The accepted [web application specification](web-application.md) defines its deployment, security, design, and Phase 3 workflow boundary.
+
 Manual browser upload should be possible, even though the CLI is the primary workflow. The exact staging and commit interaction is tracked by [Issue #36](https://github.com/aryan-f/Niyan/issues/36).
 
 ### CLI
@@ -134,7 +136,7 @@ The [Git LFS protocol](git-lfs-and-object-storage.md) and [Git write transport p
 1. The server authorizes access at the dataset boundary.
 2. The web application requests tree, history, and metadata through the REST API.
 3. A file download or viewer session receives a short-lived, narrowly scoped transfer URL after authorization.
-4. The browser obtains the file directly from object storage or an explicitly defined viewer service, not through the Django application process.
+4. The browser obtains Git LFS content directly from object storage. A small Git-resident blob may stream through the authorized repository endpoint; Django never proxies bulk LFS bytes.
 
 ### Stream or Download Data from Python
 
@@ -148,6 +150,8 @@ The [Git LFS protocol](git-lfs-and-object-storage.md) and [Git write transport p
 ## Deployment Boundary
 
 Docker Compose remains the intended easy self-hosting path, but it is not a prerequisite for initial development. The server must accept externally managed PostgreSQL and S3-compatible services through environment configuration. Initial development may use remote infrastructure and does not require local PostgreSQL or S3 containers.
+
+The generated Nuxt SPA is served under the Django origin. Build assets use `/static/niyan/`, while Django-owned API, Git, admin, and static routes remain distinct and all other browser paths fall back to the SPA entry document. A Node.js runtime is required to build and develop the frontend but not to run the initial production deployment.
 
 A bundled maintenance worker performs failed-upload and incomplete-multipart cleanup defined by the [Git LFS and object-storage protocol](git-lfs-and-object-storage.md). It uses PostgreSQL-backed state and does not require Redis or Celery in v1. Docker Compose and production deployment guidance run the worker by default. Other asynchronous infrastructure may be introduced only after a concrete workload requires it.
 

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** server, web, CLI, Python client, and deployment maintainers
-- **Last reviewed:** 2026-09-17
+- **Last reviewed:** 2026-09-18
 
 ## Purpose
 
@@ -116,6 +116,9 @@ Access tokens expire after at most 365 days in v1. Installations may configure a
 
 The versioned REST API provides the following authentication operations:
 
+- initialize Django's CSRF cookie and return the matching request token;
+- create and end a same-origin Django browser session for an existing account;
+- search active users by username or display name for authenticated access-management interfaces;
 - list the signed-in user's access-token metadata;
 - create a manually issued access token and return its complete secret once;
 - revoke one of the signed-in user's access tokens;
@@ -125,6 +128,8 @@ The versioned REST API provides the following authentication operations:
 - inspect the currently authenticated user and access-token metadata.
 
 Token-management and device-approval operations require a browser-authenticated session, except that an active bearer token may revoke itself. Device initiation and polling are unauthenticated but rate-limited. Polling distinguishes pending, denied, expired, and successful authorization without revealing user information before success.
+
+There is no public registration endpoint in v1. An installation administrator creates the initial superuser and provisions additional accounts through Django admin.
 
 The access-token secret returned by manual creation or device exchange is never returned again. Token listing and current-credential inspection return only metadata and a non-secret fingerprint.
 

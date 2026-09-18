@@ -20,6 +20,7 @@ Architecture decision records (ADRs) capture consequential choices, their contex
 - [ADR 0007: Use one S3-compatible bucket with dataset-scoped keys](0007-shared-s3-bucket.md) — Accepted
 - [ADR 0008: Use Python 3.13 and Django 5.2 LTS](0008-backend-baseline.md) — Accepted
 - [ADR 0009: Distribute the CLI and filesystem client as one Python package](0009-unified-python-client.md) — Accepted
+- [ADR 0010: Deploy the Nuxt web application as a static SPA](0010-static-nuxt-spa.md) — Accepted
 
 ## Creating an ADR
 

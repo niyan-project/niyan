@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** server, web, CLI, Python client, and deployment maintainers
-- **Last reviewed:** 2026-09-17
+- **Last reviewed:** 2026-09-18
 
 ## Purpose
 
@@ -59,6 +59,8 @@ A namespace is visible to its personal owner, to a member of that group or an an
 The server exposes explicit policy operations for:
 
 - viewing a namespace;
+- creating a root or nested group;
+- managing a group's identity and direct memberships;
 - creating a dataset in a namespace;
 - reading a dataset and its repository;
 - writing repository refs;
@@ -69,6 +71,8 @@ The server exposes explicit policy operations for:
 Domain services remain responsible for enforcing the relevant policy inside their transaction. Selectors may use the same policy to avoid returning inaccessible objects, but a selector is not a substitute for authorization at mutation time.
 
 Django superusers may bypass Niyān product policy for installation recovery and administration. Staff status and Django model permissions alone do not grant product access.
+
+Any authenticated user may create a root group. Only an effective owner of a group may create a child group beneath it or manage that group's identity and direct memberships. These capabilities do not grant Django-admin access and must never be evaluated through Django auth-group membership.
 
 ## Initial Grant API
 

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** server, web, CLI, and Python-client maintainers
-- **Last reviewed:** 2026-09-17
+- **Last reviewed:** 2026-09-18
 
 ## Purpose
 
@@ -32,6 +32,7 @@ Authenticated REST clients may inspect a visible dataset repository through thes
 - a tree listing at an exact resolved commit and optional directory path;
 - blob metadata at an exact resolved commit and path;
 - raw Git-resident blob content; and
+- a browser download action that selects the correct Git or Git LFS transfer path; and
 - a root README selected from conventional names.
 
 Every revision input is resolved to an exact commit before another repository operation occurs, and responses expose that resolved commit. Repository commands receive arguments without a shell, reject control characters, use bounded timeouts, and return sanitized errors.
@@ -44,7 +45,9 @@ Bearer clients require `read_repository`; browser sessions rely on their current
 
 Blob metadata includes path, Git object identifier, byte size, and whether the blob is a valid Git LFS pointer. When it is an LFS pointer, metadata also exposes the SHA-256 object identifier and declared size.
 
-Until the LFS data plane is implemented, raw download of an LFS pointer returns an explicit unavailable response rather than returning the pointer text as though it were the dataset file. Ordinary Git-resident blobs stream directly from Git without loading their complete contents into Django memory.
+Raw download of an LFS pointer returns an explicit unavailable response rather than returning the pointer text as though it were the dataset file. Ordinary Git-resident blobs stream directly from Git without loading their complete contents into Django memory and use attachment disposition for browser downloads.
+
+The browser download action resolves the requested revision to an exact commit. For an ordinary blob it returns the authorized same-origin raw endpoint at that exact commit. For an available LFS object it returns a short-lived direct object-storage action and Django does not proxy the bytes. A missing or not-yet-available LFS object returns an explicit conflict instead of a pointer or broken storage URL.
 
 README content is returned only for an ordinary Git-resident blob and is capped at a documented small-file limit. Rendering and sanitization belong to the web application and viewer boundary.
 
@@ -55,7 +58,7 @@ This slice reads repositories directly. It does not store refs, commits, paths, 
 ## Initial Non-goals
 
 - Push, ref mutation, and the initial protected-ref baseline, which are defined by the [Git write transport and ref-update policy](git-write-transport.md).
-- Git LFS object transfer.
+- Defining Git LFS object transfer itself, which belongs to the focused Git LFS and object-storage protocol.
 - Server-side diffs or semantic file comparison.
 - Full-text search.
 - Archive generation.

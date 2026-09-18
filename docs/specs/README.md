@@ -24,8 +24,9 @@ Architecture decision records use corresponding `Proposed`, `Accepted`, `Depreca
 - [CLI](cli.md) — the command surface and behavior of the `niyan` console entry point.
 - [Namespaces and datasets](namespaces-and-datasets.md) — stable identity, human-facing paths, and dataset repository creation.
 - [Python filesystem client](python-client.md) — the unified package's read-only `fsspec` surface for streaming and downloads.
+- [Web application](web-application.md) — the Nuxt SPA, same-origin deployment, visual system, browser workflows, and Phase 3 acceptance boundary.
 
-The system overview, authentication, authorization, namespace and dataset lifecycle, repository-read contract, Git write policy, Git LFS protocol, Git LFS tracking policy, and CLI are accepted. The Python filesystem client remains draft pending its addressing and compatibility decision, which its draft boundary states explicitly.
+The system overview, authentication, authorization, namespace and dataset lifecycle, repository-read contract, Git write policy, Git LFS protocol, Git LFS tracking policy, CLI, and web application are accepted. The Python filesystem client remains draft pending its addressing and compatibility decision, which its draft boundary states explicitly.
 
 As the design becomes concrete, split the overview into focused specifications for the remaining storage lifecycle, REST API, viewer plugins, and deployment behavior. Do not create those documents merely to fill out a directory; create each when it has enough substance to review.
 
