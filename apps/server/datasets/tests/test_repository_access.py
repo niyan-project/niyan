@@ -13,7 +13,7 @@ from django.utils import timezone
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
 from datasets.git_http import GitHttpBackend, RECEIVE_PACK
-from datasets.models import Dataset, DatasetGrant
+from datasets.models import Dataset, DatasetGrant, LfsObject
 from datasets.services import create_dataset
 from namespaces.models import NamespaceMembership
 
@@ -322,6 +322,59 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
             self.assertEqual(self.run_git('--git-dir', str(self.repository_root / f'{self.dataset.id}.git'), 'show', 'main:notes.txt').stdout, 'pushed version\n')
             self.assertNotIn(self.write_raw_token, push.stdout)
             self.assertNotIn(self.write_raw_token, push.stderr)
+        finally:
+            askpass_directory.cleanup()
+            checkout_directory.cleanup()
+
+    def test_git_push_requires_new_lfs_objects_before_ref_visibility(self):
+        """Reject a pointer with missing content, then lease and promote its verified object."""
+
+        checkout_directory = TemporaryDirectory()
+        askpass_directory = TemporaryDirectory()
+        try:
+            askpass = Path(askpass_directory.name) / 'askpass.sh'
+            askpass.write_text('#!/bin/sh\ncase "$1" in\n  *Username*) printf "%s\\n" "$NIYAN_TEST_USERNAME" ;;\n  *) printf "%s\\n" "$NIYAN_TEST_PASSWORD" ;;\nesac\n')
+            askpass.chmod(0o700)
+            destination = Path(checkout_directory.name) / 'checkout'
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    'GIT_ASKPASS': str(askpass),
+                    'GIT_TERMINAL_PROMPT': '0',
+                    'NIYAN_TEST_USERNAME': self.user.username,
+                    'NIYAN_TEST_PASSWORD': self.write_raw_token,
+                }
+            )
+            repository_url = f'{self.live_server_url.replace("http://", f"http://{self.user.username}@")}/git/{self.dataset.id}.git'
+            clone = self.run_git('-c', 'credential.helper=', 'clone', repository_url, str(destination), check=False, env=environment)
+            self.assertEqual(clone.returncode, 0, clone.stderr)
+            self.run_git('-C', str(destination), 'config', 'user.name', 'Researcher')
+            self.run_git('-C', str(destination), 'config', 'user.email', 'researcher@example.test')
+            oid = 'e' * 64
+            (destination / 'new-large.bin').write_text(f'version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize 12\n')
+            self.run_git('-C', str(destination), 'add', 'new-large.bin')
+            self.run_git('-C', str(destination), 'commit', '-m', 'Add new large data')
+
+            rejected = self.run_git('-C', str(destination), '-c', 'credential.helper=', 'push', 'origin', 'main', check=False, env=environment)
+
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('Required Git LFS objects are unavailable', rejected.stderr)
+            self.assertEqual(self.run_git('--git-dir', str(self.repository_root / f'{self.dataset.id}.git'), 'rev-parse', 'main').stdout.strip(), self.main_commit)
+
+            lfs_object = LfsObject.objects.create(
+                dataset=self.dataset,
+                oid=oid,
+                size=12,
+                state=LfsObject.State.AVAILABLE,
+                verification_method=LfsObject.VerificationMethod.SIZE,
+                available_at=timezone.now(),
+            )
+            accepted = self.run_git('-C', str(destination), '-c', 'credential.helper=', 'push', 'origin', 'main', check=False, env=environment)
+
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            lfs_object.refresh_from_db()
+            self.assertEqual(lfs_object.state, LfsObject.State.REFERENCED)
+            self.assertNotIn(self.write_raw_token, rejected.stderr + accepted.stderr)
         finally:
             askpass_directory.cleanup()
             checkout_directory.cleanup()

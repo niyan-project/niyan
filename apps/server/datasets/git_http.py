@@ -1,13 +1,18 @@
 import os
+import json
 import subprocess
+import sys
 import threading
 from http import HTTPStatus
+from pathlib import Path
 
+from django.conf import settings
 from django.http import HttpResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from accounts.authentication import access_token_permits, authenticate_git_basic
 from datasets.policies import can_read_dataset, can_write_repository
+from datasets.git_push import GitPushDenied, create_push_context
 from datasets.repositories import GitRepositoryStore, RepositoryReadError
 from datasets.models import Dataset
 
@@ -64,8 +69,15 @@ def git_http_backend(request, dataset_id, git_path=''):
     if service == RECEIVE_PACK and not can_write_repository(user=access_token.user, dataset=dataset):
         return HttpResponse('The credential does not permit this repository operation.', status=403, content_type='text/plain')
 
+    push_context = None
+    if service == RECEIVE_PACK and request.method == 'POST':
+        try:
+            push_context = create_push_context(dataset=dataset, access_token=access_token)
+        except GitPushDenied:
+            return HttpResponse('The credential does not permit this repository operation.', status=403, content_type='text/plain')
+
     try:
-        return GitHttpBackend().execute(request=request, dataset=dataset, git_path=git_path, service=service, remote_user=access_token.user)
+        return GitHttpBackend().execute(request=request, dataset=dataset, git_path=git_path, service=service, remote_user=access_token.user, push_context=push_context)
     except RepositoryReadError:
         return HttpResponse('Dataset repository unavailable.', status=503, content_type='text/plain')
 
@@ -84,7 +96,7 @@ class GitHttpBackend:
 
         self.repository_store = repository_store or GitRepositoryStore()
 
-    def execute(self, *, request, dataset, git_path, service, remote_user):
+    def execute(self, *, request, dataset, git_path, service, remote_user, push_context=None):
         """Start Git's backend and return its streamed CGI response.
 
         Parameters
@@ -99,6 +111,8 @@ class GitHttpBackend:
             Validated Git service selected from the request path and query.
         remote_user : accounts.models.User
             User recorded in the CGI environment without credentials.
+        push_context : datasets.models.GitPushContext, optional
+            Opaque receive authorization context for a POST execution.
 
         Returns
         -------
@@ -112,11 +126,12 @@ class GitHttpBackend:
         """
 
         repository_path = self.repository_store.existing_path(dataset.id)
-        environment = self._environment(request=request, repository_path=repository_path, git_path=git_path, service=service, remote_user=remote_user)
+        environment = self._environment(request=request, repository_path=repository_path, git_path=git_path, service=service, remote_user=remote_user, push_context=push_context)
         command = ['git']
         if service == RECEIVE_PACK:
             # Enable receive-pack for this authorized subprocess only; never mutate repository configuration or make the service globally anonymous.
-            command.extend(['-c', 'http.receivepack=true'])
+            hooks_path = Path(__file__).resolve().with_name('git_hooks')
+            command.extend(['-c', 'http.receivepack=true', '-c', f'core.hooksPath={hooks_path}'])
         command.append('http-backend')
         try:
             process = subprocess.Popen(
@@ -144,7 +159,7 @@ class GitHttpBackend:
                 response[name] = value
         return response
 
-    def _environment(self, *, request, repository_path, git_path, service, remote_user):
+    def _environment(self, *, request, repository_path, git_path, service, remote_user, push_context=None):
         """Build a CGI environment without forwarding authorization data.
 
         Parameters
@@ -159,6 +174,8 @@ class GitHttpBackend:
             Validated Git service selected from the endpoint.
         remote_user : accounts.models.User
             Authenticated token owner.
+        push_context : datasets.models.GitPushContext, optional
+            Opaque receive authorization context for the server-controlled hook.
 
         Returns
         -------
@@ -167,7 +184,7 @@ class GitHttpBackend:
         """
 
         environment = {
-            'PATH': os.environ.get('PATH', ''),
+            'PATH': f'{Path(sys.executable).parent}{os.pathsep}{os.environ.get("PATH", "")}',
             'HOME': str(repository_path.parent),
             'LANG': 'C.UTF-8',
             'GIT_CONFIG_NOSYSTEM': '1',
@@ -187,6 +204,18 @@ class GitHttpBackend:
         git_protocol = request.headers.get('Git-Protocol')
         if git_protocol:
             environment['HTTP_GIT_PROTOCOL'] = git_protocol
+        if push_context is not None:
+            # The hook gets current database routing but no access-token secret, request Authorization header, or storage credential.
+            environment.update(
+                {
+                    'NIYAN_PUSH_CONTEXT_ID': str(push_context.id),
+                    'NIYAN_DATASET_ID': str(push_context.dataset_id),
+                    'NIYAN_HOOK_DATABASE_CONFIG': json.dumps(settings.DATABASES['default'], default=str),
+                    'NIYAN_HOOK_REPOSITORIES_ROOT': str(settings.REPOSITORIES_ROOT),
+                    'NIYAN_GIT_PUSH_CONTEXT_LIFETIME_SECONDS': str(settings.NIYAN_GIT_PUSH_CONTEXT_LIFETIME_SECONDS),
+                    'NIYAN_GIT_PUSH_LEASE_LIFETIME_SECONDS': str(settings.NIYAN_GIT_PUSH_LEASE_LIFETIME_SECONDS),
+                }
+            )
         return environment
 
     def _pump_request(self, request, process):
