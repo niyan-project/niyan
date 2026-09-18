@@ -57,6 +57,30 @@ def get_visible_dataset_by_path(*, dataset_path, user):
     return dataset
 
 
+def resolve_visible_dataset_path(*, locator_path, user):
+    """Resolve the longest visible dataset prefix and remaining repository path.
+
+    Parameters
+    ----------
+    locator_path : str
+        Human-facing dataset path followed by an optional repository path.
+    user : accounts.models.User
+        Authenticated user requesting access.
+
+    Returns
+    -------
+    tuple[datasets.models.Dataset, str] or None
+        Visible dataset and normalized repository-relative remainder, or ``None``.
+    """
+
+    path_parts = [part for part in locator_path.strip('/').split('/') if part]
+    for prefix_length in range(len(path_parts), 1, -1):
+        dataset = get_visible_dataset_by_path(dataset_path='/'.join(path_parts[:prefix_length]), user=user)
+        if dataset is not None:
+            return dataset, '/'.join(path_parts[prefix_length:])
+    return None
+
+
 def get_deletable_dataset(*, dataset_id, user):
     """Return an owned dataset including one with deletion already in progress.
 

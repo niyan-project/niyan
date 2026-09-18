@@ -125,6 +125,30 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertEqual(readme['path'], 'README.md')
         self.assertIn('Dataset documentation.', readme['content'])
 
+    def test_resolve_dataset_path_and_revision_for_one_pinned_operation(self):
+        """Resolve a full locator to dataset, repository path, and exact commit."""
+
+        path_response = self.client.get('/api/v1/datasets/resolve', {'path': 'researcher/images/nested/sample.csv'})
+        revision_response = self.client.get(self.repository_url('revisions/resolve'), {'revision': 'main'})
+
+        self.assertEqual(path_response.status_code, 200)
+        self.assertEqual(path_response.json()['id'], str(self.dataset.id))
+        self.assertEqual(path_response.json()['path'], 'researcher/images')
+        self.assertEqual(path_response.json()['repository_path'], 'nested/sample.csv')
+        self.assertEqual(revision_response.status_code, 200)
+        self.assertEqual(revision_response.json(), {'dataset_id': str(self.dataset.id), 'requested_revision': 'main', 'resolved_commit': self.main_commit})
+
+    def test_capabilities_are_public_and_machine_readable(self):
+        """Allow a client to reject incompatible servers before authentication."""
+
+        self.client.logout()
+        response = self.client.get('/api/v1/capabilities')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['api_versions'], ['v1'])
+        self.assertEqual(response.json()['filesystem']['protocol_version'], 1)
+        self.assertIn('exact-revision-resolution', response.json()['filesystem']['features'])
+
     def test_blob_metadata_and_raw_download_distinguish_lfs_pointer(self):
         """Stream ordinary blobs while refusing to misrepresent LFS pointers."""
 
@@ -165,10 +189,15 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertEqual(git_response.json()['storage'], 'git')
         self.assertIn('/repository/blob/raw?', git_response.json()['url'])
         self.assertEqual(git_response.json()['resolved_commit'], self.main_commit)
+        self.assertEqual(git_response.json()['object_id'], self.run_git('-C', self.working_directory.name, 'rev-parse', 'HEAD:notes.txt').stdout.strip())
+        self.assertIsNone(git_response.json()['lfs_object_id'])
+        self.assertFalse(git_response.json()['range_supported'])
         self.assertEqual(lfs_response.status_code, 200)
         self.assertEqual(lfs_response.json()['storage'], 'lfs')
         self.assertEqual(lfs_response.json()['url'], action.url)
         self.assertEqual(lfs_response.json()['size'], 123456)
+        self.assertEqual(lfs_response.json()['lfs_object_id'], self.lfs_object_id)
+        self.assertTrue(lfs_response.json()['range_supported'])
 
     def test_repository_browsing_requires_repository_scope_for_bearer_token(self):
         """Keep API metadata scopes separate from repository-content scopes."""

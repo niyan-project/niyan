@@ -62,6 +62,14 @@ class CommitListResponse(Schema):
     items: list[CommitResponse]
 
 
+class RevisionResolutionResponse(Schema):
+    """Pin one caller-supplied revision to an immutable Git commit."""
+
+    dataset_id: UUID
+    requested_revision: str
+    resolved_commit: str
+
+
 class TreeEntryResponse(Schema):
     """Describe one direct child in a Git tree."""
 
@@ -108,11 +116,14 @@ class DownloadActionResponse(Schema):
     resolved_commit: str
     path: str
     size: int
+    object_id: str
+    lfs_object_id: str | None
     storage: Literal['git', 'lfs']
     method: str
     url: str
     headers: dict[str, str]
     expires_in: int | None
+    range_supported: bool
 
 
 router = Router(tags=['repository'], auth=session_or_access_token)
@@ -169,6 +180,23 @@ def list_repository_commits_endpoint(request, dataset_id: UUID, revision: str = 
             return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
         resolved_commit, items, next_offset = browser.list_commits(revision=revision, limit=limit, offset=offset)
         return {'resolved_commit': resolved_commit, 'limit': limit, 'offset': offset, 'next_offset': next_offset, 'items': items}
+    except RevisionNotFound:
+        return Status(404, {'code': 'revision_not_found', 'detail': 'The requested revision does not exist.'})
+    except InvalidRepositoryInput:
+        return Status(422, {'code': 'validation_error', 'detail': 'The repository request is invalid.'})
+    except RepositoryBrowseError:
+        return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be read.'})
+
+
+@router.get('/{dataset_id}/repository/revisions/resolve', response={200: RevisionResolutionResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse, 503: ErrorResponse})
+def resolve_repository_revision_endpoint(request, dataset_id: UUID, revision: str = 'main'):
+    """Resolve a branch, tag, or commit once for consistent client reads."""
+
+    try:
+        browser = get_browser(request, dataset_id)
+        if browser is None:
+            return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+        return {'dataset_id': dataset_id, 'requested_revision': revision, 'resolved_commit': browser.resolve_revision(revision)}
     except RevisionNotFound:
         return Status(404, {'code': 'revision_not_found', 'detail': 'The requested revision does not exist.'})
     except InvalidRepositoryInput:
@@ -259,11 +287,14 @@ def authorize_repository_download_endpoint(request, dataset_id: UUID, path: str,
                 'resolved_commit': resolved_commit,
                 'path': metadata.path,
                 'size': metadata.size,
+                'object_id': metadata.object_id,
+                'lfs_object_id': None,
                 'storage': 'git',
                 'method': 'GET',
                 'url': request.build_absolute_uri(f'/api/v1/datasets/{dataset_id}/repository/blob/raw?{query}'),
                 'headers': {},
                 'expires_in': None,
+                'range_supported': False,
             }
 
         lfs_object = LfsObject.objects.select_related('dataset').filter(dataset_id=dataset_id, oid=metadata.lfs_object_id, size=metadata.lfs_size, state__in=[LfsObject.State.AVAILABLE, LfsObject.State.REFERENCED]).first()
@@ -274,11 +305,14 @@ def authorize_repository_download_endpoint(request, dataset_id: UUID, path: str,
             'resolved_commit': resolved_commit,
             'path': metadata.path,
             'size': metadata.lfs_size,
+            'object_id': metadata.object_id,
+            'lfs_object_id': metadata.lfs_object_id,
             'storage': 'lfs',
             'method': action.method,
             'url': action.url,
             'headers': action.headers,
             'expires_in': action.expires_in,
+            'range_supported': True,
         }
     except RevisionNotFound:
         return Status(404, {'code': 'revision_not_found', 'detail': 'The requested revision does not exist.'})

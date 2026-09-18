@@ -110,6 +110,16 @@ Browser-assisted login is not part of the filesystem API. A person may establish
 
 The server exposes an inexpensive `/api/v1/capabilities` operation containing the supported REST API versions, filesystem protocol version, and stable feature identifiers. The v1 client requires filesystem protocol version `1` and the features needed for the requested operation. At minimum, the completed Phase 4 server advertises exact revision resolution, repository metadata, Git-blob reads, and authorized Git LFS download actions.
 
+The Phase 4 REST contract uses these operations:
+
+- `GET /api/v1/capabilities` advertises `api_versions`, filesystem `protocol_version`, and stable kebab-case feature identifiers without requiring authentication;
+- `GET /api/v1/datasets/resolve?path=...` resolves the longest visible dataset prefix and returns its immutable ID, canonical dataset path, remaining `repository_path`, and Git URL;
+- `GET /api/v1/datasets/{dataset_id}/repository/revisions/resolve?revision=...` pins a branch, tag, or commit expression to `resolved_commit`;
+- the existing tree and blob metadata operations accept that exact commit in their `revision` parameter; and
+- `GET /api/v1/datasets/{dataset_id}/repository/download?revision=...&path=...` returns an authorized action with exact commit, normalized path, Git blob identity, optional LFS SHA-256 identity, size, storage kind, expiry, headers, and object-specific range support.
+
+Dataset and path resolution must preserve private-resource non-disclosure. A download action is a short-lived capability, not stable metadata, and must not be cached beyond the operation that requested it.
+
 Object-specific behavior remains attached to the resolved metadata or transfer action. In particular, HTTP range support and action expiry are properties of a particular file transfer rather than installation-wide promises.
 
 The client may cache installation capabilities for the lifetime of a filesystem instance. It must fail with a compatibility error before transferring content when the server cannot provide the required semantics. An unknown additive feature is ignored; an unsupported protocol version or missing required feature is never silently emulated with weaker consistency.

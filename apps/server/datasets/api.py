@@ -15,7 +15,7 @@ from accounts.models import AccessToken
 from datasets.models import DatasetGrant
 from datasets.policies import get_dataset_role
 from datasets.repositories import RepositoryDeletionError, RepositoryProvisioningError
-from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_visible_dataset, get_visible_dataset_by_path, list_visible_datasets, list_visible_namespace_datasets
+from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_visible_dataset, list_visible_datasets, list_visible_namespace_datasets, resolve_visible_dataset_path
 from datasets.services import DatasetObjectDeletionError, DatasetPathConflict, create_dataset, create_dataset_grant, delete_dataset, delete_dataset_grant, update_dataset, update_dataset_grant
 from namespaces.models import Namespace
 
@@ -57,6 +57,7 @@ class DatasetRepositoryLocationResponse(Schema):
 
     id: UUID
     path: str
+    repository_path: str
     name: str
     git_url: str
 
@@ -285,14 +286,15 @@ def list_datasets_endpoint(request, namespace_id: UUID | None = None, limit: int
 
 @router.get('/resolve', response={200: DatasetRepositoryLocationResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})
 def resolve_dataset_repository_endpoint(request, path: str = Query(..., min_length=3, max_length=2048)):
-    """Resolve a human-facing path for CLI repository operations."""
+    """Resolve the longest dataset prefix and optional repository path."""
 
-    dataset = get_visible_dataset_by_path(dataset_path=path, user=request.auth)
-    if dataset is None:
+    resolution = resolve_visible_dataset_path(locator_path=path, user=request.auth)
+    if resolution is None:
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    dataset, repository_path = resolution
     require_access(request=request, scope='read_repository', dataset_id=dataset.id)
     git_path = reverse('git-dataset-root', kwargs={'dataset_id': dataset.id})
-    return {'id': dataset.id, 'path': dataset.path, 'name': dataset.name, 'git_url': request.build_absolute_uri(git_path)}
+    return {'id': dataset.id, 'path': dataset.path, 'repository_path': repository_path, 'name': dataset.name, 'git_url': request.build_absolute_uri(git_path)}
 
 
 @router.get('/{dataset_id}', response={200: DatasetResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse})

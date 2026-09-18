@@ -1,4 +1,4 @@
-from ninja import NinjaAPI
+from ninja import NinjaAPI, Schema
 from ninja.errors import AuthenticationError, AuthorizationError, Throttled, ValidationError
 
 from accounts.api import router as authentication_router
@@ -14,6 +14,39 @@ api.add_router('/datasets', datasets_router)
 api.add_router('/datasets', repository_router)
 api.add_router('/datasets', lfs_router)
 api.add_router('/namespaces', namespaces_router)
+
+
+class FileSystemCapabilities(Schema):
+    """Describe the supported Niyān filesystem protocol surface."""
+
+    protocol_version: int
+    features: list[str]
+
+
+class CapabilitiesResponse(Schema):
+    """Advertise stable API and filesystem compatibility identifiers."""
+
+    api_versions: list[str]
+    filesystem: FileSystemCapabilities
+
+
+@api.get('/capabilities', auth=None, response=CapabilitiesResponse, tags=['capabilities'])
+def get_capabilities(request):
+    """Return inexpensive public compatibility metadata for clients."""
+
+    return {
+        'api_versions': ['v1'],
+        'filesystem': {
+            'protocol_version': 1,
+            'features': [
+                'dataset-path-resolution',
+                'exact-revision-resolution',
+                'repository-metadata',
+                'git-blob-reads',
+                'authorized-lfs-download-actions',
+            ],
+        },
+    }
 
 
 @api.exception_handler(AuthenticationError)
