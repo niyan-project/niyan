@@ -5,6 +5,7 @@ from pathlib import Path
 
 from niyan import __version__
 from niyan.auth import authentication_status, login, login_with_token, logout, resolve_host
+from niyan.cache import prune_cache, show_cache_status
 from niyan.config import AppPaths
 from niyan.credentials import CredentialStores
 from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
@@ -99,6 +100,12 @@ def build_parser():
     pull_parser.add_argument('--exclude', action='append', metavar='GLOB', help='Replace the saved Git LFS exclude selection. Repeat for multiple globs.')
     pull_parser.add_argument('--metadata-only', action='store_true', help='Update Git metadata and pointer files without downloading Git LFS content.')
     commands.add_parser('push', help='Upload required Git LFS objects and publish the current dataset branch.')
+
+    cache_parser = commands.add_parser('cache', help='Inspect and safely reclaim local Git LFS storage.')
+    cache_commands = cache_parser.add_subparsers(dest='cache_command', required=True)
+    cache_commands.add_parser('status', help='Show total, protected, and reclaimable local Git LFS content.')
+    cache_prune_parser = cache_commands.add_parser('prune', help='Verify and permanently remove reclaimable local Git LFS content.')
+    cache_prune_parser.add_argument('--dry-run', action='store_true', help='Report verified candidates without deleting any local objects.')
 
     return parser
 
@@ -289,6 +296,12 @@ def main(argv=None):
             return 0
         if arguments.command == 'push':
             push_dataset(paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'cache' and arguments.cache_command == 'status':
+            show_cache_status(paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'cache' and arguments.cache_command == 'prune':
+            prune_cache(paths=paths, stores=stores, dry_run=arguments.dry_run, cwd=Path.cwd())
             return 0
         parser.error('Unsupported command.')
     except NiyanCliError as error:

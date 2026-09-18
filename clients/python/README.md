@@ -10,6 +10,8 @@ Repository commands require Git on `PATH`, and commands that materialize large-f
 
 Niyān-managed checkouts configure the upload-only `niyan-multipart` Git LFS custom transfer automatically. The agent uses the checkout's selected access token for bounded multipart-control requests, verifies the local LFS object, uploads byte ranges directly to signed object-storage URLs with four-part concurrency and bounded retries, and leaves downloads on Git LFS's standard basic adapter.
 
+`niyan cache status` reports the checkout's local Git LFS storage and the content protected or reclaimable under Git LFS's standard retention policy. `niyan cache prune --dry-run` previews remotely verified candidates without mutation. An actual prune repeats remote verification and requires explicit confirmation before Git LFS deletes anything.
+
 The initial development commands are:
 
 ```shell
