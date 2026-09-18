@@ -98,6 +98,7 @@ def clone_dataset(*, host, dataset_path, destination, paths, stores, full_histor
                 lfs_exclude=lfs_exclude,
             ),
         )
+        configure_lfs_transfer(destination_path, environment=child_environment)
         if not metadata_only:
             _materialize_lfs(command_prefix=command_prefix, checkout=destination_path, remote='origin', include=lfs_include, exclude=lfs_exclude, environment=child_environment)
     if metadata_only:
@@ -105,6 +106,30 @@ def clone_dataset(*, host, dataset_path, destination, paths, stores, full_histor
     else:
         print('Clone complete.', file=output)
     return destination_path
+
+
+def configure_lfs_transfer(checkout, *, environment=None):
+    """Configure Niyān's upload-only custom transfer in one managed checkout.
+
+    Parameters
+    ----------
+    checkout : pathlib.Path
+        Niyān dataset working tree.
+    environment : mapping, optional
+        Child process environment override used by tests.
+    """
+
+    child_environment = _git_environment(environment)
+    settings = (
+        ('lfs.customtransfer.niyan-multipart.path', 'niyan'),
+        ('lfs.customtransfer.niyan-multipart.args', '_lfs-transfer'),
+        ('lfs.customtransfer.niyan-multipart.concurrent', 'false'),
+        ('lfs.customtransfer.niyan-multipart.direction', 'upload'),
+    )
+    for name, value in settings:
+        result = _run_git(['git', '-C', str(checkout), 'config', '--local', '--replace-all', name, value], cwd=checkout, environment=child_environment, failure='Git could not configure the Niyān LFS transfer agent.')
+        if result.returncode != 0:
+            raise GitError('Git could not configure the Niyān LFS transfer agent.')
 
 
 def fetch_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):

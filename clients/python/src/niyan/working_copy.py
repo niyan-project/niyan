@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from niyan.errors import GitError
-from niyan.git import load_checkout_identity
+from niyan.git import configure_lfs_transfer, load_checkout_identity
 
 
 LFS_POINTER_VERSION = b'version https://git-lfs.github.com/spec/v1'
@@ -93,6 +93,7 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, cwd
 
     working_directory = Path(cwd or Path.cwd())
     _require_checkout(working_directory)
+    configure_lfs_transfer(working_directory)
     root = Path(os.fsdecode(_run_git(working_directory, ['rev-parse', '--show-toplevel'], operation='locate the working tree').stdout).strip())
     git_pathspecs = _git_pathspecs(working_directory, paths)
     status_arguments = ['-c', 'status.relativePaths=false', 'status', '--porcelain=v2', '-z', '--untracked-files=all']

@@ -10,6 +10,7 @@ from niyan.credentials import CredentialStores
 from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
 from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper, fetch_dataset, pull_dataset
+from niyan.lfs_transfer import run_lfs_transfer
 from niyan.working_copy import commit_changes, restore_paths, show_diff, show_log, show_status, stage_paths
 
 
@@ -130,11 +131,19 @@ def main(argv=None):
 
     command_line = list(sys.argv[1:] if argv is None else argv)
     internal_helper = bool(command_line and command_line[0] == '_credential-helper')
-    parser = build_credential_helper_parser() if internal_helper else build_parser()
-    arguments = parser.parse_args(command_line[1:] if internal_helper else command_line)
+    internal_transfer = bool(command_line and command_line[0] == '_lfs-transfer')
+    if internal_helper:
+        parser = build_credential_helper_parser()
+    elif internal_transfer:
+        parser = argparse.ArgumentParser(prog='niyan _lfs-transfer')
+    else:
+        parser = build_parser()
+    arguments = parser.parse_args(command_line[1:] if internal_helper or internal_transfer else command_line)
     paths = AppPaths.from_environment()
     stores = CredentialStores(paths=paths)
     try:
+        if internal_transfer:
+            return run_lfs_transfer(paths=paths, stores=stores, cwd=Path.cwd())
         if internal_helper:
             if arguments.operation != 'get':
                 return 0

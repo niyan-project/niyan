@@ -966,7 +966,7 @@ class CliGitTests(unittest.TestCase):
             )
 
         clone_command = run.call_args_list[0].args[0]
-        lfs_command = run.call_args_list[1].args[0]
+        lfs_command = run.call_args_list[-1].args[0]
         child_environment = run.call_args_list[0].kwargs['env']
         self.assertEqual(destination, self.root / 'checkout')
         self.assertNotIn('niyan_selector_secret', repr(run.call_args_list))
@@ -977,6 +977,16 @@ class CliGitTests(unittest.TestCase):
         self.assertIn('--single-branch', clone_command)
         self.assertIn('--no-tags', clone_command)
         self.assertEqual(lfs_command[-5:], ['lfs', 'pull', '--include=', '--exclude=', 'origin'])
+        configured_names = [call.args[0][-2] for call in run.call_args_list[1:5]]
+        self.assertEqual(
+            configured_names,
+            [
+                'lfs.customtransfer.niyan-multipart.path',
+                'lfs.customtransfer.niyan-multipart.args',
+                'lfs.customtransfer.niyan-multipart.concurrent',
+                'lfs.customtransfer.niyan-multipart.direction',
+            ],
+        )
         self.assertEqual(save_identity.call_args.args[0], self.root / 'checkout')
 
     def test_full_history_clone_omits_shallow_fetch_options(self):
@@ -1053,7 +1063,8 @@ class CliGitTests(unittest.TestCase):
                 stderr=io.StringIO(),
             )
 
-        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_count, 5)
+        self.assertEqual(run.call_args_list[1].args[0][-2:], ['lfs.customtransfer.niyan-multipart.path', 'niyan'])
         identity = save_identity.call_args.args[1]
         self.assertEqual(identity.lfs_include, ('raw/**', 'labels/*.csv'))
         self.assertEqual(identity.lfs_exclude, ('raw/tmp/**',))

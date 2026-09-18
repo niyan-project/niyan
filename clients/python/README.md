@@ -8,6 +8,8 @@ Repository commands require Git on `PATH`, and commands that materialize large-f
 
 `niyan add` delegates pathspec and ignore handling to Git, stores new binary files and files larger than 10 MiB through stock Git LFS, and keeps small text in ordinary Git. `--lfs` and `--git` persist explicit standard `.gitattributes` overrides; an existing tracked file keeps its current storage mode unless the user deliberately overrides it.
 
+Niyān-managed checkouts configure the upload-only `niyan-multipart` Git LFS custom transfer automatically. The agent uses the checkout's selected access token for bounded multipart-control requests, verifies the local LFS object, uploads byte ranges directly to signed object-storage URLs with four-part concurrency and bounded retries, and leaves downloads on Git LFS's standard basic adapter.
+
 The initial development commands are:
 
 ```shell

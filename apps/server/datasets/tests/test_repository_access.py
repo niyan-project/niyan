@@ -417,6 +417,24 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
             self.assertNotIn(self.raw_token, git_config)
             self.assertNotIn(self.raw_token, result.stdout)
             self.assertNotIn(self.raw_token, result.stderr)
+            transfer_configuration = {
+                name: subprocess.run(['git', '-C', str(destination), 'config', '--local', '--get', name], check=True, capture_output=True, text=True).stdout.strip()
+                for name in (
+                    'lfs.customtransfer.niyan-multipart.path',
+                    'lfs.customtransfer.niyan-multipart.args',
+                    'lfs.customtransfer.niyan-multipart.concurrent',
+                    'lfs.customtransfer.niyan-multipart.direction',
+                )
+            }
+            self.assertEqual(
+                transfer_configuration,
+                {
+                    'lfs.customtransfer.niyan-multipart.path': 'niyan',
+                    'lfs.customtransfer.niyan-multipart.args': '_lfs-transfer',
+                    'lfs.customtransfer.niyan-multipart.concurrent': 'false',
+                    'lfs.customtransfer.niyan-multipart.direction': 'upload',
+                },
+            )
         finally:
             checkout_root.cleanup()
             cli_state.cleanup()
