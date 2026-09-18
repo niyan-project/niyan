@@ -149,6 +149,8 @@ class CheckoutIdentity:
     dataset_path: str
     remote: str = 'origin'
     history: str = 'shallow'
+    lfs_include: tuple[str, ...] = ()
+    lfs_exclude: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, value):
@@ -182,10 +184,12 @@ class CheckoutIdentity:
             raise ConfigurationError('Niyān checkout remote is invalid.')
         if history not in ('shallow', 'full'):
             raise ConfigurationError('Niyān checkout history policy is invalid.')
+        lfs_include = _materialization_patterns(value.get('lfs_include', []))
+        lfs_exclude = _materialization_patterns(value.get('lfs_exclude', []))
         host = value['host'].strip().rstrip('/')
         if not host.startswith(('https://', 'http://')):
             raise ConfigurationError('Niyān checkout host is invalid.')
-        return cls(host=host, dataset_id=dataset_id, dataset_path=normalize_dataset_path(value['dataset_path']), remote=remote, history=history)
+        return cls(host=host, dataset_id=dataset_id, dataset_path=normalize_dataset_path(value['dataset_path']), remote=remote, history=history, lfs_include=lfs_include, lfs_exclude=lfs_exclude)
 
     def to_dict(self):
         """Return checkout identity fields suitable for local configuration.
@@ -400,3 +404,11 @@ def normalize_dataset_path(dataset_path):
     if len(normalized.split('/')) < 2 or any(not part or part in ('.', '..') for part in normalized.split('/')):
         raise ConfigurationError('Dataset paths must contain a namespace and dataset slug.')
     return normalized
+
+
+def _materialization_patterns(value):
+    """Validate persisted repeatable Git LFS include or exclude patterns."""
+
+    if not isinstance(value, list) or any(not isinstance(pattern, str) or not pattern or '\x00' in pattern or ',' in pattern for pattern in value):
+        raise ConfigurationError('Niyān checkout LFS materialization patterns are invalid.')
+    return tuple(value)

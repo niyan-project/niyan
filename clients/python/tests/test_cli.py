@@ -9,12 +9,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from niyan.auth import authentication_status, login, login_with_token, logout, resolve_host, select_credential
-from niyan.cli import _read_access_token, build_parser, main
+from niyan.cli import _error_exit_status, _read_access_token, build_parser, main
 from niyan.config import AppPaths, CheckoutIdentity, Configuration, CredentialBinding, find_local_config
 from niyan.credentials import CredentialStores, InsecureFileCredentialStore
 from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
-from niyan.errors import ApiError, ConfigurationError, CredentialError, GitError
-from niyan.git import clone_dataset, credential_helper, load_checkout_identity
+from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, GitError
+from niyan.git import clone_dataset, credential_helper, fetch_dataset, load_checkout_identity, pull_dataset
 from niyan.http import normalize_host
 
 
@@ -877,13 +877,18 @@ class CliDatasetForgeTests(unittest.TestCase):
         """Keep the public parser aligned with the accepted forge surface."""
 
         create_arguments = build_parser().parse_args(['dataset', 'create', 'researcher/images', '--name', 'Images', '--clone', '--full-history'])
-        clone_arguments = build_parser().parse_args(['dataset', 'clone', 'researcher/images', '--full-history'])
+        clone_arguments = build_parser().parse_args(
+            ['dataset', 'clone', 'researcher/images', '--full-history', '--include', 'raw/**', '--include', 'labels/*.csv', '--exclude', 'raw/tmp/**', '--metadata-only']
+        )
         edit_arguments = build_parser().parse_args(['dataset', 'edit', 'researcher/images', '--slug', 'microscopy'])
         delete_arguments = build_parser().parse_args(['dataset', 'delete', 'researcher/images', '--confirm', 'researcher/images'])
 
         self.assertTrue(create_arguments.clone)
         self.assertTrue(create_arguments.full_history)
         self.assertTrue(clone_arguments.full_history)
+        self.assertEqual(clone_arguments.include, ['raw/**', 'labels/*.csv'])
+        self.assertEqual(clone_arguments.exclude, ['raw/tmp/**'])
+        self.assertTrue(clone_arguments.metadata_only)
         self.assertEqual(edit_arguments.slug, 'microscopy')
         self.assertEqual(delete_arguments.confirm, 'researcher/images')
 
@@ -960,16 +965,18 @@ class CliGitTests(unittest.TestCase):
                 stderr=io.StringIO(),
             )
 
-        command = run.call_args.args[0]
-        child_environment = run.call_args.kwargs['env']
+        clone_command = run.call_args_list[0].args[0]
+        lfs_command = run.call_args_list[1].args[0]
+        child_environment = run.call_args_list[0].kwargs['env']
         self.assertEqual(destination, self.root / 'checkout')
-        self.assertNotIn('niyan_selector_secret', repr(command))
-        self.assertNotIn('niyan_environment_secret', repr(command))
+        self.assertNotIn('niyan_selector_secret', repr(run.call_args_list))
+        self.assertNotIn('niyan_environment_secret', repr(run.call_args_list))
         self.assertNotIn('NIYAN_TOKEN', child_environment)
-        self.assertIn('credential.helper=', command[2])
-        self.assertIn('--depth=1', command)
-        self.assertIn('--single-branch', command)
-        self.assertIn('--no-tags', command)
+        self.assertIn('credential.helper=', clone_command[2])
+        self.assertIn('--depth=1', clone_command)
+        self.assertIn('--single-branch', clone_command)
+        self.assertIn('--no-tags', clone_command)
+        self.assertEqual(lfs_command[-5:], ['lfs', 'pull', '--include=', '--exclude=', 'origin'])
         self.assertEqual(save_identity.call_args.args[0], self.root / 'checkout')
 
     def test_full_history_clone_omits_shallow_fetch_options(self):
@@ -1005,11 +1012,180 @@ class CliGitTests(unittest.TestCase):
                 stderr=io.StringIO(),
             )
 
-        command = run.call_args.args[0]
-        self.assertNotIn('--depth=1', command)
-        self.assertNotIn('--single-branch', command)
-        self.assertNotIn('--no-tags', command)
+        clone_command = run.call_args_list[0].args[0]
+        self.assertNotIn('--depth=1', clone_command)
+        self.assertNotIn('--single-branch', clone_command)
+        self.assertNotIn('--no-tags', clone_command)
         self.assertEqual(save_identity.call_args.args[1].history, 'full')
+
+    def test_metadata_only_clone_records_filters_without_requiring_git_lfs(self):
+        """Keep pointer-only clones useful for later selected materialization."""
+
+        class CloneApi:
+            """Return one same-origin repository location."""
+
+            def __init__(self, host, token=None):
+                self.host = host
+                self.token = token
+
+            def resolve_dataset(self, dataset_path):
+                return 200, {
+                    'id': 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+                    'path': 'researcher/images',
+                    'name': 'Images',
+                    'git_url': 'https://niyan.example/git/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.git',
+                }
+
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git.shutil.which', side_effect=lambda executable: '/usr/bin/git' if executable == 'git' else None), patch('niyan.git.subprocess.run', return_value=completed) as run, patch('niyan.git._save_checkout_identity') as save_identity:
+            clone_dataset(
+                host='https://niyan.example',
+                dataset_path='researcher/images',
+                destination='checkout',
+                paths=self.paths,
+                stores=self.stores,
+                include=['raw/**', 'labels/*.csv'],
+                exclude=['raw/tmp/**'],
+                metadata_only=True,
+                cwd=self.root,
+                environment={'PATH': os.environ.get('PATH', '')},
+                api_factory=CloneApi,
+                stderr=io.StringIO(),
+            )
+
+        self.assertEqual(run.call_count, 1)
+        identity = save_identity.call_args.args[1]
+        self.assertEqual(identity.lfs_include, ('raw/**', 'labels/*.csv'))
+        self.assertEqual(identity.lfs_exclude, ('raw/tmp/**',))
+
+    def test_fetch_and_pull_use_saved_identity_authentication_and_selection(self):
+        """Delegate network and materialization while persisting shallow policy."""
+
+        identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+            lfs_include=('images/**',),
+            lfs_exclude=('images/tmp/**',),
+        )
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git.load_checkout_identity', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._current_upstream', return_value='origin/main'), patch('niyan.git._save_checkout_identity') as save_identity, patch('niyan.git.subprocess.run', return_value=completed) as run:
+            fetch_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
+            pull_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
+
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn('fetch', commands[0])
+        pull_commands = commands[1:]
+        self.assertEqual([command[command.index('-C') + 2] for command in pull_commands], ['fetch', 'merge', 'fetch', 'lfs'])
+        self.assertIn('--ff-only', pull_commands[1])
+        self.assertIn('--depth=1', pull_commands[2])
+        self.assertEqual(pull_commands[3][-3:], ['--include=images/**', '--exclude=images/tmp/**', 'origin'])
+        self.assertEqual(save_identity.call_args.args[1].history, 'shallow')
+        self.assertNotIn('niyan_selector_secret', repr(commands))
+
+    def test_full_history_pull_unshallows_and_divergence_is_explicit(self):
+        """Convert history deliberately and classify a failed fast-forward as conflict."""
+
+        identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+        )
+        success = subprocess.CompletedProcess(args=[], returncode=0)
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git.load_checkout_identity', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._current_upstream', return_value='origin/main'), patch('niyan.git._save_checkout_identity') as save_identity, patch('niyan.git.subprocess.run', return_value=success) as run:
+            pull_dataset(paths=self.paths, stores=self.stores, full_history=True, metadata_only=True, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
+
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn('--unshallow', commands[0])
+        self.assertFalse(any('--depth=1' in command for command in commands))
+        self.assertEqual(save_identity.call_args.args[1].history, 'full')
+
+        failure = subprocess.CompletedProcess(args=[], returncode=1)
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git.load_checkout_identity', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._current_upstream', return_value='origin/main'), patch('niyan.git.subprocess.run', side_effect=[success, failure]):
+            with self.assertRaises(GitConflictError):
+                pull_dataset(paths=self.paths, stores=self.stores, metadata_only=True, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
+
+
+class GitSynchronizationTests(unittest.TestCase):
+    """Verify shallow fast-forward behavior with real local Git repositories."""
+
+    def setUp(self):
+        """Create a file-protocol bare remote and depth-one checkout."""
+
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.source = self.root / 'source'
+        self.remote = self.root / 'remote.git'
+        self.checkout = self.root / 'checkout'
+        self.paths = AppPaths(config_home=self.root / 'config', data_home=self.root / 'data')
+        self.keyring = FakeKeyring()
+        self.stores = CredentialStores(paths=self.paths, keyring_module=self.keyring)
+        self.binding = CredentialBinding(token_id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', username='researcher', storage='keyring')
+        configuration = Configuration(default_host='https://niyan.example')
+        configuration.set_binding(host='https://niyan.example', binding=self.binding)
+        configuration.save(self.paths.global_config)
+        self.stores.keyring.set(host='https://niyan.example', token_id=self.binding.token_id, token='niyan_selector_secret')
+        self.identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+        )
+
+        self._git('init', '--initial-branch=main', str(self.source))
+        self._git('-C', str(self.source), 'config', 'user.name', 'Niyān Test')
+        self._git('-C', str(self.source), 'config', 'user.email', 'test@niyan.example')
+        (self.source / 'data.txt').write_text('initial\n')
+        self._git('-C', str(self.source), 'add', 'data.txt')
+        self._git('-C', str(self.source), 'commit', '-m', 'Initial')
+        self._git('clone', '--bare', str(self.source), str(self.remote))
+        self._git('clone', '--depth=1', '--no-tags', f'file://{self.remote}', str(self.checkout))
+        self._git('-C', str(self.checkout), 'config', 'user.name', 'Niyān Test')
+        self._git('-C', str(self.checkout), 'config', 'user.email', 'test@niyan.example')
+
+    def tearDown(self):
+        """Remove all local Git fixtures."""
+
+        self.temporary_directory.cleanup()
+
+    def test_metadata_only_pull_fast_forwards_and_restores_depth_one(self):
+        """Use Git ancestry checks while keeping only the new tip visible."""
+
+        (self.source / 'data.txt').write_text('remote update\n')
+        self._git('-C', str(self.source), 'add', 'data.txt')
+        self._git('-C', str(self.source), 'commit', '-m', 'Remote update')
+        self._git('-C', str(self.source), 'push', str(self.remote), 'main')
+
+        with patch('niyan.git._require_checkout', return_value=self.identity), patch('niyan.git._save_checkout_identity'):
+            pull_dataset(paths=self.paths, stores=self.stores, metadata_only=True, cwd=self.checkout, stderr=io.StringIO())
+
+        self.assertEqual((self.checkout / 'data.txt').read_text(), 'remote update\n')
+        self.assertEqual(self._git('-C', str(self.checkout), 'rev-list', '--count', 'HEAD').stdout.strip(), '1')
+        self.assertEqual(self._git('-C', str(self.checkout), 'rev-parse', '--is-shallow-repository').stdout.strip(), 'true')
+
+    def test_divergent_pull_preserves_local_commit(self):
+        """Reject a competing remote tip without resetting local work."""
+
+        (self.checkout / 'local.txt').write_text('local\n')
+        self._git('-C', str(self.checkout), 'add', 'local.txt')
+        self._git('-C', str(self.checkout), 'commit', '-m', 'Local update')
+        local_commit = self._git('-C', str(self.checkout), 'rev-parse', 'HEAD').stdout.strip()
+        (self.source / 'remote.txt').write_text('remote\n')
+        self._git('-C', str(self.source), 'add', 'remote.txt')
+        self._git('-C', str(self.source), 'commit', '-m', 'Remote update')
+        self._git('-C', str(self.source), 'push', str(self.remote), 'main')
+
+        with patch('niyan.git._require_checkout', return_value=self.identity), patch('niyan.git._save_checkout_identity'):
+            with self.assertRaises(GitConflictError):
+                pull_dataset(paths=self.paths, stores=self.stores, metadata_only=True, cwd=self.checkout, stderr=io.StringIO())
+
+        self.assertEqual(self._git('-C', str(self.checkout), 'rev-parse', 'HEAD').stdout.strip(), local_commit)
+        self.assertTrue((self.checkout / 'local.txt').exists())
+        self.assertFalse((self.checkout / 'remote.txt').exists())
+
+    def _git(self, *arguments):
+        """Run one local Git fixture command."""
+
+        return subprocess.run(['git', *arguments], check=True, capture_output=True, text=True)
 
 
 class CheckoutIdentityTests(unittest.TestCase):
@@ -1065,6 +1241,42 @@ class CheckoutIdentityTests(unittest.TestCase):
 
         with self.assertRaises(ConfigurationError):
             load_checkout_identity(self.checkout)
+
+    def test_checkout_identity_round_trips_lfs_materialization_selection(self):
+        """Persist repeatable filters as non-secret checkout policy."""
+
+        config_path = find_local_config(self.checkout, required=True)
+        configuration = Configuration.load(config_path)
+        configuration.set_checkout(
+            CheckoutIdentity(
+                host='https://niyan.example',
+                dataset_id='22222222-2222-2222-2222-222222222222',
+                dataset_path='researcher/images',
+                lfs_include=('raw/**', 'labels/*.csv'),
+                lfs_exclude=('raw/tmp/**',),
+            )
+        )
+        configuration.save(config_path)
+
+        loaded = Configuration.load(config_path).checkout
+
+        self.assertEqual(loaded.lfs_include, ('raw/**', 'labels/*.csv'))
+        self.assertEqual(loaded.lfs_exclude, ('raw/tmp/**',))
+        self.assertNotIn('metadata_only', config_path.read_text())
+
+    def test_fetch_and_pull_command_grammar_exposes_materialization_controls(self):
+        """Keep synchronization options aligned with the accepted public CLI."""
+
+        fetch_arguments = build_parser().parse_args(['fetch'])
+        pull_arguments = build_parser().parse_args(['pull', '--full-history', '--include', 'raw/**', '--exclude', 'tmp/**', '--metadata-only'])
+
+        self.assertEqual(fetch_arguments.command, 'fetch')
+        self.assertTrue(pull_arguments.full_history)
+        self.assertEqual(pull_arguments.include, ['raw/**'])
+        self.assertEqual(pull_arguments.exclude, ['tmp/**'])
+        self.assertTrue(pull_arguments.metadata_only)
+        self.assertEqual(_error_exit_status(GitConflictError('diverged')), 6)
+        self.assertEqual(_error_exit_status(GitDependencyError('missing')), 8)
 
 
 class HostValidationTests(unittest.TestCase):

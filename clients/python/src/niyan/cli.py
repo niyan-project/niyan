@@ -8,8 +8,8 @@ from niyan.auth import authentication_status, login, login_with_token, logout, r
 from niyan.config import AppPaths
 from niyan.credentials import CredentialStores
 from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
-from niyan.errors import ApiError, ConfigurationError, CredentialError, NiyanCliError
-from niyan.git import clone_dataset, credential_helper
+from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, NiyanCliError
+from niyan.git import clone_dataset, credential_helper, fetch_dataset, pull_dataset
 from niyan.working_copy import commit_changes, restore_paths, show_diff, show_log, show_status
 
 
@@ -53,6 +53,9 @@ def build_parser():
     clone_parser.add_argument('dataset_path', help='Dataset path in namespace/dataset form.')
     clone_parser.add_argument('destination', nargs='?', help='Checkout destination. Defaults to the dataset slug.')
     clone_parser.add_argument('--full-history', action='store_true', help='Fetch complete history and remote branches instead of the shallow default.')
+    clone_parser.add_argument('--include', action='append', metavar='GLOB', help='Materialize only matching Git LFS paths. Repeat for multiple globs.')
+    clone_parser.add_argument('--exclude', action='append', metavar='GLOB', help='Do not materialize matching Git LFS paths. Repeat for multiple globs.')
+    clone_parser.add_argument('--metadata-only', action='store_true', help='Clone Git metadata and pointer files without downloading Git LFS content.')
     clone_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
     list_parser = dataset_commands.add_parser('list', help='List datasets visible to the current user.')
     list_parser.add_argument('namespace', nargs='?', help='Optional root or nested namespace path.')
@@ -82,6 +85,12 @@ def build_parser():
     diff_parser.add_argument('--staged', action='store_true', help='Compare the index to HEAD instead of the working tree to the index.')
     log_parser = commands.add_parser('log', help='Show bounded dataset commit history.')
     log_parser.add_argument('--limit', type=_positive_integer, default=20, help='Maximum commits to show. Defaults to 20.')
+    commands.add_parser('fetch', help='Fetch remote Git refs without modifying the working tree or downloading LFS objects.')
+    pull_parser = commands.add_parser('pull', help='Fast-forward the current branch and materialize its configured LFS working set.')
+    pull_parser.add_argument('--full-history', action='store_true', help='Convert a shallow checkout to complete Git history.')
+    pull_parser.add_argument('--include', action='append', metavar='GLOB', help='Replace the saved Git LFS include selection. Repeat for multiple globs.')
+    pull_parser.add_argument('--exclude', action='append', metavar='GLOB', help='Replace the saved Git LFS exclude selection. Repeat for multiple globs.')
+    pull_parser.add_argument('--metadata-only', action='store_true', help='Update Git metadata and pointer files without downloading Git LFS content.')
 
     return parser
 
@@ -189,6 +198,9 @@ def main(argv=None):
                 paths=paths,
                 stores=stores,
                 full_history=arguments.full_history,
+                include=arguments.include,
+                exclude=arguments.exclude,
+                metadata_only=arguments.metadata_only,
                 cwd=Path.cwd(),
             )
             return 0
@@ -238,6 +250,20 @@ def main(argv=None):
         if arguments.command == 'log':
             show_log(limit=arguments.limit, cwd=Path.cwd())
             return 0
+        if arguments.command == 'fetch':
+            fetch_dataset(paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'pull':
+            pull_dataset(
+                paths=paths,
+                stores=stores,
+                full_history=arguments.full_history,
+                include=arguments.include,
+                exclude=arguments.exclude,
+                metadata_only=arguments.metadata_only,
+                cwd=Path.cwd(),
+            )
+            return 0
         parser.error('Unsupported command.')
     except NiyanCliError as error:
         print(f'error: {error}', file=sys.stderr)
@@ -272,7 +298,7 @@ def _read_access_token(*, stdin=None, secret_prompt=getpass.getpass):
 
 
 def _error_exit_status(error):
-    """Map public authentication failures to the documented exit categories."""
+    """Map public CLI failures to the documented exit categories."""
 
     if isinstance(error, CredentialError):
         return 3
@@ -293,6 +319,10 @@ def _error_exit_status(error):
             return 7
     if isinstance(error, ConfigurationError):
         return 2
+    if isinstance(error, GitConflictError):
+        return 6
+    if isinstance(error, GitDependencyError):
+        return 8
     return 1
 
 

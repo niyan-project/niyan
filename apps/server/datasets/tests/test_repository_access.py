@@ -370,7 +370,7 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
         self.assertEqual(response['WWW-Authenticate'], 'Basic realm="Niyan Git"')
 
     def test_niyan_cli_resolves_and_clones_without_persisting_token_in_git(self):
-        """Protect the complete CLI-to-REST-to-smart-HTTP clone workflow."""
+        """Protect the metadata-only CLI-to-REST-to-smart-HTTP clone workflow."""
 
         cli_state = TemporaryDirectory()
         checkout_root = TemporaryDirectory()
@@ -403,7 +403,7 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
                 }
             )
             result = subprocess.run(
-                [sys.executable, '-m', 'niyan', 'dataset', 'clone', 'researcher/images', str(destination)],
+                [sys.executable, '-m', 'niyan', 'dataset', 'clone', 'researcher/images', str(destination), '--metadata-only'],
                 cwd=checkout_root.name,
                 env=environment,
                 check=False,

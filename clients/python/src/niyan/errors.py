@@ -33,3 +33,11 @@ class ApiError(NiyanCliError):
 
 class GitError(NiyanCliError):
     """Report failure to invoke or complete an internal Git operation."""
+
+
+class GitConflictError(GitError):
+    """Report a safe refusal caused by divergent or conflicting Git state."""
+
+
+class GitDependencyError(GitError):
+    """Report a missing local Git or Git LFS dependency."""

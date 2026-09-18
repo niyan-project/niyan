@@ -4,16 +4,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlparse
 
 from niyan.auth import select_credential
 from niyan.config import CheckoutIdentity, Configuration, find_local_config
-from niyan.errors import CredentialError, GitError
+from niyan.errors import CredentialError, GitConflictError, GitDependencyError, GitError
 from niyan.http import ApiClient
 
 
-def clone_dataset(*, host, dataset_path, destination, paths, stores, full_history=False, cwd=None, environment=None, api_factory=ApiClient, stderr=None):
+def clone_dataset(*, host, dataset_path, destination, paths, stores, full_history=False, include=None, exclude=None, metadata_only=False, cwd=None, environment=None, api_factory=ApiClient, stderr=None):
     """Resolve and clone one dataset through Niyān-managed Git credentials.
 
     Parameters
@@ -30,6 +32,12 @@ def clone_dataset(*, host, dataset_path, destination, paths, stores, full_histor
         Credential storage adapters.
     full_history : bool, optional
         Clone all reachable history and remote branches instead of the shallow default.
+    include : list[str], optional
+        Repeatable Git LFS include patterns saved for later pulls.
+    exclude : list[str], optional
+        Repeatable Git LFS exclude patterns saved for later pulls.
+    metadata_only : bool, optional
+        Leave LFS pointer files unmaterialized for this operation.
     cwd : pathlib.Path, optional
         Working directory for local credential selection and Git.
     environment : mapping, optional
@@ -61,43 +69,143 @@ def clone_dataset(*, host, dataset_path, destination, paths, stores, full_histor
     destination_path = Path(destination) if destination else Path(canonical_path.rsplit('/', 1)[-1])
     if not destination_path.is_absolute():
         destination_path = working_directory / destination_path
-    if shutil.which('git') is None:
-        raise GitError('Git is required to clone Niyān datasets.')
+    _require_dependency('git', 'Git is required to clone Niyān datasets.')
+    lfs_include = _materialization_patterns(include)
+    lfs_exclude = _materialization_patterns(exclude)
+    if not metadata_only:
+        _require_dependency('git-lfs', 'Git LFS is required to materialize dataset files. Use --metadata-only to clone pointer files without it.')
 
-    helper_arguments, temporary_secret = _credential_helper_arguments(host=host, credential=credential)
-    helper_config = f'!{shlex.join(helper_arguments)}'
-    command = [
-        'git',
-        '-c',
-        'credential.helper=',
-        '-c',
-        f'credential.helper={helper_config}',
-        '-c',
-        'credential.useHttpPath=true',
-        'clone',
-    ]
-    if not full_history:
-        command.extend(['--depth=1', '--single-branch', '--no-tags'])
-    command.extend(['--', git_url, str(destination_path)])
     child_environment = dict(environment if environment is not None else os.environ)
     child_environment.pop('NIYAN_TOKEN', None)
-    # LFS transfer is a later protocol slice. Prevent an installed Git LFS filter from making unauthenticated transfer attempts during this metadata-only clone.
+    # Checkout pointers first so all bulk materialization happens through one explicit, filtered Git LFS operation.
     child_environment['GIT_LFS_SKIP_SMUDGE'] = '1'
-    try:
-        result = subprocess.run(command, cwd=working_directory, env=child_environment, check=False)
-    except OSError as error:
-        raise GitError('Git could not be started.') from error
-    finally:
-        if temporary_secret is not None:
-            temporary_secret.unlink(missing_ok=True)
-    if result.returncode != 0:
-        raise GitError('Git could not clone the requested dataset.')
-    _save_checkout_identity(
-        destination_path,
-        CheckoutIdentity(host=host, dataset_id=dataset_id, dataset_path=canonical_path, history='full' if full_history else 'shallow'),
-    )
-    print('Clone complete. Git LFS content is not downloaded in this version; LFS-tracked paths remain pointer files.', file=output)
+    with _authenticated_git(host=host, credential=credential) as command_prefix:
+        command = [*command_prefix, 'clone']
+        if not full_history:
+            command.extend(['--depth=1', '--single-branch', '--no-tags'])
+        command.extend(['--', git_url, str(destination_path)])
+        result = _run_git(command, cwd=working_directory, environment=child_environment, failure='Git could not clone the requested dataset.')
+        if result.returncode != 0:
+            raise GitError('Git could not clone the requested dataset.')
+        _save_checkout_identity(
+            destination_path,
+            CheckoutIdentity(
+                host=host,
+                dataset_id=dataset_id,
+                dataset_path=canonical_path,
+                history='full' if full_history else 'shallow',
+                lfs_include=lfs_include,
+                lfs_exclude=lfs_exclude,
+            ),
+        )
+        if not metadata_only:
+            _materialize_lfs(command_prefix=command_prefix, checkout=destination_path, remote='origin', include=lfs_include, exclude=lfs_exclude, environment=child_environment)
+    if metadata_only:
+        print('Clone complete. Git LFS content was left as pointer files.', file=output)
+    else:
+        print('Clone complete.', file=output)
     return destination_path
+
+
+def fetch_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
+    """Fetch remote Git refs without changing the current worktree or LFS cache.
+
+    Parameters
+    ----------
+    paths : niyan.config.AppPaths
+        CLI configuration and data paths.
+    stores : niyan.credentials.CredentialStores
+        Credential storage adapters.
+    cwd : pathlib.Path, optional
+        Directory inside the Niyān checkout.
+    environment : mapping, optional
+        Parent environment override used by tests.
+    stderr : file-like object, optional
+        Human-facing progress destination.
+    """
+
+    checkout = Path(cwd or Path.cwd())
+    identity = _require_checkout(checkout)
+    credential = select_credential(host=identity.host, dataset_path=identity.dataset_path, dataset_id=identity.dataset_id, paths=paths, stores=stores, cwd=checkout, environment=environment)
+    child_environment = _git_environment(environment)
+    with _authenticated_git(host=identity.host, credential=credential) as command_prefix:
+        result = _run_git([*command_prefix, '-C', str(checkout), 'fetch', identity.remote], cwd=checkout, environment=child_environment, failure='Git could not fetch the dataset remote.')
+        if result.returncode != 0:
+            raise GitError('Git could not fetch the dataset remote.')
+    print('Fetch complete.', file=stderr or sys.stderr)
+
+
+def pull_dataset(*, paths, stores, full_history=False, include=None, exclude=None, metadata_only=False, cwd=None, environment=None, stderr=None):
+    """Fast-forward one checkout and materialize its selected LFS working set.
+
+    Parameters
+    ----------
+    paths : niyan.config.AppPaths
+        CLI configuration and data paths.
+    stores : niyan.credentials.CredentialStores
+        Credential storage adapters.
+    full_history : bool, optional
+        Convert a shallow checkout to complete Git history.
+    include : list[str], optional
+        Replacement repeatable Git LFS include patterns.
+    exclude : list[str], optional
+        Replacement repeatable Git LFS exclude patterns.
+    metadata_only : bool, optional
+        Skip LFS materialization for this invocation.
+    cwd : pathlib.Path, optional
+        Directory inside the Niyān checkout.
+    environment : mapping, optional
+        Parent environment override used by tests.
+    stderr : file-like object, optional
+        Human-facing progress destination.
+    """
+
+    checkout = Path(cwd or Path.cwd())
+    identity = _require_checkout(checkout)
+    selected_include = identity.lfs_include if include is None else _materialization_patterns(include)
+    selected_exclude = identity.lfs_exclude if exclude is None else _materialization_patterns(exclude)
+    if not metadata_only:
+        _require_dependency('git-lfs', 'Git LFS is required to materialize dataset files. Use --metadata-only to update pointer files without it.')
+    credential = select_credential(host=identity.host, dataset_path=identity.dataset_path, dataset_id=identity.dataset_id, paths=paths, stores=stores, cwd=checkout, environment=environment)
+    child_environment = _git_environment(environment)
+    with _authenticated_git(host=identity.host, credential=credential) as command_prefix:
+        branch = _current_branch(checkout, child_environment)
+        upstream = _current_upstream(checkout, child_environment)
+        if not upstream.startswith(f'{identity.remote}/'):
+            raise GitError(f'The current branch does not track the configured Niyān remote {identity.remote!r}.')
+
+        if full_history and identity.history == 'shallow':
+            fetch_arguments = ['fetch', '--unshallow', '--tags', identity.remote]
+        elif full_history:
+            fetch_arguments = ['fetch', '--tags', identity.remote]
+        else:
+            fetch_arguments = ['fetch', identity.remote]
+        fetched = _run_git([*command_prefix, '-C', str(checkout), *fetch_arguments], cwd=checkout, environment=child_environment, failure='Git could not fetch the dataset remote.')
+        if fetched.returncode != 0:
+            raise GitError('Git could not fetch the dataset remote.')
+
+        merged = _run_git([*command_prefix, '-C', str(checkout), 'merge', '--ff-only', '--no-edit', upstream], cwd=checkout, environment=child_environment, failure='Git could not update the current dataset branch.', capture_output=True)
+        if merged.returncode != 0:
+            raise GitConflictError('The current dataset branch has diverged or contains changes that prevent a fast-forward pull. Resolve it explicitly with Niyān merge commands.')
+
+        updated_identity = replace(identity, history='full' if full_history else identity.history, lfs_include=selected_include, lfs_exclude=selected_exclude)
+        if updated_identity.history == 'shallow':
+            reshallowed = _run_git(
+                [*command_prefix, '-C', str(checkout), 'fetch', '--depth=1', '--no-tags', identity.remote, branch],
+                cwd=checkout,
+                environment=child_environment,
+                failure='Git updated the dataset but could not restore the depth-one history policy.',
+            )
+            if reshallowed.returncode != 0:
+                raise GitError('Git updated the dataset but could not restore the depth-one history policy.')
+        _save_checkout_identity(checkout, updated_identity)
+        if not metadata_only:
+            _materialize_lfs(command_prefix=command_prefix, checkout=checkout, remote=identity.remote, include=selected_include, exclude=selected_exclude, environment=child_environment)
+
+    if metadata_only:
+        print('Pull complete. Git LFS content was left as pointer files.', file=stderr or sys.stderr)
+    else:
+        print('Pull complete.', file=stderr or sys.stderr)
 
 
 def load_checkout_identity(cwd, *, validate_remote=True, run=subprocess.run):
@@ -152,8 +260,113 @@ def update_checkout_path(cwd, dataset_path):
     identity = configuration.checkout
     if identity is None or identity.dataset_path == dataset_path:
         return
-    configuration.set_checkout(CheckoutIdentity(host=identity.host, dataset_id=identity.dataset_id, dataset_path=dataset_path, remote=identity.remote, history=identity.history))
+    configuration.set_checkout(replace(identity, dataset_path=dataset_path))
     configuration.save(config_path)
+
+
+def _require_checkout(checkout):
+    """Load and validate the current checkout or raise an actionable error."""
+
+    _require_dependency('git', 'Git is required to synchronize Niyān datasets.')
+    identity = load_checkout_identity(checkout)
+    if identity is None:
+        raise GitError('This command must run inside a configured Niyān dataset checkout.')
+    return identity
+
+
+def _require_dependency(executable, message):
+    """Require one external repository tool before mutating local state."""
+
+    if shutil.which(executable) is None:
+        raise GitDependencyError(message)
+
+
+def _materialization_patterns(patterns):
+    """Validate repeatable patterns before passing one joined value to Git LFS."""
+
+    normalized = tuple(patterns or ())
+    if any(not isinstance(pattern, str) or not pattern or '\x00' in pattern or ',' in pattern for pattern in normalized):
+        raise GitError('Git LFS include and exclude patterns must be non-empty globs without NUL bytes or commas.')
+    return normalized
+
+
+def _git_environment(environment):
+    """Build a minimal child override that suppresses implicit LFS smudging."""
+
+    child_environment = dict(environment if environment is not None else os.environ)
+    child_environment.pop('NIYAN_TOKEN', None)
+    child_environment['GIT_LFS_SKIP_SMUDGE'] = '1'
+    return child_environment
+
+
+@contextmanager
+def _authenticated_git(*, host, credential):
+    """Yield Git arguments for one credential and remove any secret handoff."""
+
+    helper_arguments, temporary_secret = _credential_helper_arguments(host=host, credential=credential)
+    helper_config = f'!{shlex.join(helper_arguments)}'
+    try:
+        yield [
+            'git',
+            '-c',
+            'credential.helper=',
+            '-c',
+            f'credential.helper={helper_config}',
+            '-c',
+            'credential.useHttpPath=true',
+        ]
+    finally:
+        if temporary_secret is not None:
+            temporary_secret.unlink(missing_ok=True)
+
+
+def _run_git(command, *, cwd, environment, failure, capture_output=False):
+    """Run one shell-free Git command while translating process-start failures."""
+
+    try:
+        return subprocess.run(command, cwd=cwd, env=environment, check=False, capture_output=capture_output)
+    except OSError as error:
+        raise GitError(failure) from error
+
+
+def _git_output(checkout, arguments, environment, failure):
+    """Read one bounded local Git value without exposing raw diagnostics."""
+
+    try:
+        result = subprocess.run(['git', '-C', str(checkout), *arguments], cwd=checkout, env=environment, check=False, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise GitError(failure) from error
+    if result.returncode != 0:
+        raise GitError(failure)
+    return result.stdout.strip()
+
+
+def _current_branch(checkout, environment):
+    """Return the attached current branch or reject detached HEAD."""
+
+    branch = _git_output(checkout, ['symbolic-ref', '--quiet', '--short', 'HEAD'], environment, 'Niyān pull requires an attached current branch.')
+    if not branch:
+        raise GitError('Niyān pull requires an attached current branch.')
+    return branch
+
+
+def _current_upstream(checkout, environment):
+    """Return the current branch's configured upstream ref."""
+
+    return _git_output(checkout, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], environment, 'The current dataset branch has no configured upstream.')
+
+
+def _materialize_lfs(*, command_prefix, checkout, remote, include, exclude, environment):
+    """Download and check out one explicitly selected Git LFS working set."""
+
+    result = _run_git(
+        [*command_prefix, '-C', str(checkout), 'lfs', 'pull', f'--include={",".join(include)}', f'--exclude={",".join(exclude)}', remote],
+        cwd=checkout,
+        environment=environment,
+        failure='Git LFS could not materialize the selected dataset files.',
+    )
+    if result.returncode != 0:
+        raise GitError('Git LFS could not materialize the selected dataset files.')
 
 
 def _save_checkout_identity(checkout_path, identity):
