@@ -100,6 +100,7 @@ try:
         addressing_style=env('NIYAN_S3_ADDRESSING_STYLE', default='auto'),
         signature_version=env('NIYAN_S3_SIGNATURE_VERSION', default='s3v4'),
         key_prefix=env('NIYAN_S3_KEY_PREFIX', default='niyan'),
+        sha256_checksums=env.bool('NIYAN_S3_SHA256_CHECKSUMS', default=False),
         verify_tls=env.bool('NIYAN_S3_VERIFY_TLS', default=True),
         connect_timeout_seconds=env.int('NIYAN_S3_CONNECT_TIMEOUT_SECONDS', default=5),
         read_timeout_seconds=env.int('NIYAN_S3_READ_TIMEOUT_SECONDS', default=30),

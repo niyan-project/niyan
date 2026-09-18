@@ -4,10 +4,11 @@ import re
 from django.conf import settings
 from django.db import IntegrityError
 from django.http import JsonResponse
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 
 from accounts.authentication import access_token_permits, authenticate_git_basic
-from datasets.lfs_transfers import LfsTransferUnavailable, issue_download_action, issue_upload_action
+from datasets.lfs_transfers import LfsIntegrityError, LfsObjectMissing, LfsTransferUnavailable, finalize_lfs_upload, issue_download_action, issue_upload_action
 from datasets.models import Dataset, LfsObject
 from datasets.object_storage import ObjectStoreError
 from datasets.policies import can_read_dataset, can_write_repository
@@ -78,8 +79,54 @@ def lfs_batch(request, dataset_id):
     if not allowed:
         return _lfs_response({'message': 'Dataset repository not found.'}, status=404)
 
-    objects = [_negotiate_object(dataset=dataset, operation=operation, requested=requested) for requested in payload['objects']]
+    objects = [
+        _negotiate_object(
+            dataset=dataset,
+            operation=operation,
+            requested=requested,
+            verify_url=request.build_absolute_uri(reverse('git-lfs-verify', kwargs={'dataset_id': dataset.id, 'oid': requested['oid']})),
+        )
+        for requested in payload['objects']
+    ]
     return _lfs_response({'transfer': 'basic', 'hash_algo': 'sha256', 'objects': objects})
+
+
+@csrf_exempt
+def lfs_verify(request, dataset_id, oid):
+    """Finalize one basic Git LFS upload after checking stored metadata."""
+
+    if request.method != 'POST':
+        response = _lfs_response({'message': 'Only POST is supported.'}, status=405)
+        response['Allow'] = 'POST'
+        return response
+    access_token = authenticate_git_basic(request)
+    if access_token is None:
+        response = _lfs_response({'message': 'Authentication is required.'}, status=401)
+        response['WWW-Authenticate'] = 'Basic realm="Niyan Git LFS"'
+        return response
+    if not access_token_permits(access_token=access_token, scope='write_repository', dataset_id=dataset_id):
+        return _lfs_response({'message': 'The credential does not permit this operation.'}, status=403)
+    dataset = Dataset.objects.select_related('namespace__parent').filter(pk=dataset_id, deletion_started_at__isnull=True).first()
+    if dataset is None or not can_write_repository(user=access_token.user, dataset=dataset):
+        return _lfs_response({'message': 'Dataset repository not found.'}, status=404)
+    try:
+        requested = _parse_verify_request(request, route_oid=oid)
+    except InvalidLfsBatch as error:
+        return _lfs_response({'message': str(error)}, status=error.status)
+    lfs_object = LfsObject.objects.select_related('dataset').filter(dataset=dataset, oid=oid).first()
+    if lfs_object is None:
+        return _lfs_response({'message': 'The Git LFS object is unavailable.'}, status=404)
+    if lfs_object.size != requested['size']:
+        return _lfs_response({'message': 'The declared object size conflicts with existing metadata.'}, status=422)
+    try:
+        finalized = finalize_lfs_upload(lfs_object=lfs_object)
+    except LfsObjectMissing:
+        return _lfs_response({'message': 'The uploaded Git LFS object is unavailable.'}, status=404)
+    except LfsIntegrityError as error:
+        return _lfs_response({'message': str(error)}, status=422)
+    except (LfsTransferUnavailable, ObjectStoreError):
+        return _lfs_response({'message': 'Upload verification is temporarily unavailable.'}, status=503)
+    return _lfs_response({'oid': finalized.oid, 'size': finalized.size})
 
 
 def _parse_batch_request(request):
@@ -140,18 +187,45 @@ def _parse_batch_request(request):
     return {'operation': operation, 'objects': normalized_objects}
 
 
-def _negotiate_object(*, dataset, operation, requested):
+def _parse_verify_request(request, *, route_oid):
+    """Parse the bounded standard Git LFS verification request body."""
+
+    if request.content_type != LFS_CONTENT_TYPE:
+        raise InvalidLfsBatch(f'Content-Type must be {LFS_CONTENT_TYPE}.')
+    content_length = request.META.get('CONTENT_LENGTH')
+    if content_length:
+        try:
+            if int(content_length) > 16 * 1024:
+                raise InvalidLfsBatch('The verification request body is too large.', status=413)
+        except ValueError as error:
+            raise InvalidLfsBatch('The Content-Length header is invalid.') from error
+    body = request.body
+    if len(body) > 16 * 1024:
+        raise InvalidLfsBatch('The verification request body is too large.', status=413)
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise InvalidLfsBatch('The request body must contain valid JSON.') from error
+    if not OID_PATTERN.fullmatch(route_oid) or not isinstance(payload, dict) or payload.get('oid') != route_oid:
+        raise InvalidLfsBatch('The verification object identifier is invalid.')
+    size = payload.get('size')
+    if isinstance(size, bool) or not isinstance(size, int) or size < 0 or size > MAX_LFS_OBJECT_SIZE:
+        raise InvalidLfsBatch('The verification object size is invalid.')
+    return {'size': size}
+
+
+def _negotiate_object(*, dataset, operation, requested, verify_url):
     """Negotiate one object without exposing storage or policy internals."""
 
     oid = requested['oid']
     size = requested['size']
     response = {'oid': oid, 'size': size, 'authenticated': True}
     if operation == 'upload':
-        return _negotiate_upload(dataset=dataset, oid=oid, size=size, response=response)
+        return _negotiate_upload(dataset=dataset, oid=oid, size=size, response=response, verify_url=verify_url)
     return _negotiate_download(dataset=dataset, oid=oid, size=size, response=response)
 
 
-def _negotiate_upload(*, dataset, oid, size, response):
+def _negotiate_upload(*, dataset, oid, size, response, verify_url):
     """Reuse verified content or authorize one bounded basic upload."""
 
     try:
@@ -168,7 +242,7 @@ def _negotiate_upload(*, dataset, oid, size, response):
         action = issue_upload_action(lfs_object=lfs_object)
     except (LfsTransferUnavailable, ObjectStoreError):
         return _object_error(response, 503, 'The upload action is temporarily unavailable.')
-    response['actions'] = {'upload': _serialize_action(action)}
+    response['actions'] = {'upload': _serialize_action(action), 'verify': {'href': verify_url}}
     return response
 
 

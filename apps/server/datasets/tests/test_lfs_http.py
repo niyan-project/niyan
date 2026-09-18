@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
+from datasets.lfs_transfers import LfsIntegrityError, LfsObjectMissing
 from datasets.models import Dataset, LfsObject
 from datasets.object_storage import PresignedAction
 
@@ -65,7 +66,10 @@ class LfsBatchApiTests(TestCase):
                         'oid': oid,
                         'size': 12,
                         'authenticated': True,
-                        'actions': {'upload': {'href': 'https://storage.example.test/signed', 'expires_in': 300, 'header': {'Content-Length': '12'}}},
+                        'actions': {
+                            'upload': {'href': 'https://storage.example.test/signed', 'expires_in': 300, 'header': {'Content-Length': '12'}},
+                            'verify': {'href': f'http://testserver/git/{self.dataset.id}.git/info/lfs/objects/{oid}/verify'},
+                        },
                     }
                 ],
             },
@@ -129,6 +133,55 @@ class LfsBatchApiTests(TestCase):
 
         self.assertEqual(response.json()['objects'][0]['error']['code'], 422)
         self.assertIn('multipart', response.json()['objects'][0]['error']['message'])
+
+    def test_verify_endpoint_finalizes_matching_pending_object(self):
+        """Authenticate the standard verify action and expose no storage metadata."""
+
+        lfs_object = LfsObject.objects.create(dataset=self.dataset, oid='f' * 64, size=12)
+        lfs_object.state = LfsObject.State.AVAILABLE
+        with patch('datasets.lfs_http.finalize_lfs_upload', return_value=lfs_object) as finalize:
+            response = self.client.post(
+                f'/git/{self.dataset.id}.git/info/lfs/objects/{lfs_object.oid}/verify',
+                data={'oid': lfs_object.oid, 'size': lfs_object.size},
+                content_type='application/vnd.git-lfs+json',
+                HTTP_AUTHORIZATION=f'Basic {base64.b64encode(f"researcher:{self.write_token}".encode()).decode()}',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'oid': lfs_object.oid, 'size': lfs_object.size})
+        finalize.assert_called_once()
+
+    def test_verify_endpoint_maps_missing_and_integrity_failures(self):
+        """Return stable protocol failures without exposing provider details."""
+
+        lfs_object = LfsObject.objects.create(dataset=self.dataset, oid='1' * 64, size=12)
+        authorization = f'Basic {base64.b64encode(f"researcher:{self.write_token}".encode()).decode()}'
+        url = f'/git/{self.dataset.id}.git/info/lfs/objects/{lfs_object.oid}/verify'
+        with patch('datasets.lfs_http.finalize_lfs_upload', side_effect=LfsObjectMissing('provider secret')):
+            missing = self.client.post(url, data={'oid': lfs_object.oid, 'size': 12}, content_type='application/vnd.git-lfs+json', HTTP_AUTHORIZATION=authorization)
+        with patch('datasets.lfs_http.finalize_lfs_upload', side_effect=LfsIntegrityError('The uploaded Git LFS object failed SHA-256 verification.')):
+            corrupt = self.client.post(url, data={'oid': lfs_object.oid, 'size': 12}, content_type='application/vnd.git-lfs+json', HTTP_AUTHORIZATION=authorization)
+
+        self.assertEqual(missing.status_code, 404)
+        self.assertNotIn('provider secret', missing.content.decode())
+        self.assertEqual(corrupt.status_code, 422)
+        self.assertIn('SHA-256 verification', corrupt.json()['message'])
+
+    def test_verify_endpoint_requires_write_scope_and_exact_identity(self):
+        """Reject weaker credentials and mismatched verification metadata."""
+
+        lfs_object = LfsObject.objects.create(dataset=self.dataset, oid='2' * 64, size=12)
+        url = f'/git/{self.dataset.id}.git/info/lfs/objects/{lfs_object.oid}/verify'
+        read_authorization = f'Basic {base64.b64encode(f"researcher:{self.read_token}".encode()).decode()}'
+        write_authorization = f'Basic {base64.b64encode(f"researcher:{self.write_token}".encode()).decode()}'
+
+        forbidden = self.client.post(url, data={'oid': lfs_object.oid, 'size': 12}, content_type='application/vnd.git-lfs+json', HTTP_AUTHORIZATION=read_authorization)
+        wrong_oid = self.client.post(url, data={'oid': '3' * 64, 'size': 12}, content_type='application/vnd.git-lfs+json', HTTP_AUTHORIZATION=write_authorization)
+        wrong_size = self.client.post(url, data={'oid': lfs_object.oid, 'size': 13}, content_type='application/vnd.git-lfs+json', HTTP_AUTHORIZATION=write_authorization)
+
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(wrong_oid.status_code, 422)
+        self.assertEqual(wrong_size.status_code, 422)
 
     def test_basic_authentication_scope_boundary_and_current_role_are_enforced(self):
         """Apply credential and current dataset policy before exposing actions."""

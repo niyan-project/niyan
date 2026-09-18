@@ -114,6 +114,31 @@ class S3ObjectStoreTests(TestCase):
         self.assertEqual(stored_object.checksum_sha256, 'provider-sha256')
         self.assertEqual(stored_object.checksum_crc32c, 'provider-crc32c')
 
+    def test_head_requests_checksum_metadata_only_when_configured(self):
+        """Avoid optional checksum extensions on providers that do not support them."""
+
+        configuration = S3Configuration(
+            bucket='datasets',
+            region_name='us-east-1',
+            endpoint_url='https://storage.example.test',
+            access_key_id='test-access-key',
+            secret_access_key='test-secret-key',
+            addressing_style='path',
+            key_prefix='niyan',
+            sha256_checksums=True,
+        )
+        store = S3ObjectStore(configuration, client=self.client)
+        self.stubber.add_response(
+            'head_object',
+            {'ContentLength': 12, 'ChecksumSHA256': 'provider-sha256'},
+            {'Bucket': 'datasets', 'Key': 'niyan/datasets/id/objects/oid', 'ChecksumMode': 'ENABLED'},
+        )
+
+        stored_object = store.head('datasets/id/objects/oid')
+
+        self.assertTrue(store.supports_sha256_checksums)
+        self.assertEqual(stored_object.checksum_sha256, 'provider-sha256')
+
     def test_head_maps_missing_object_to_stable_exception(self):
         """Hide provider response details behind a stable missing-object error."""
 

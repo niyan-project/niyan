@@ -32,6 +32,7 @@ class S3Configuration:
     addressing_style: str = 'auto'
     signature_version: str = 's3v4'
     key_prefix: str = 'niyan'
+    sha256_checksums: bool = False
     verify_tls: bool = True
     connect_timeout_seconds: int = 5
     read_timeout_seconds: int = 30
@@ -126,6 +127,10 @@ class CompletedPart:
 class ObjectStore(Protocol):
     """Define the metadata-only object-store boundary used by domain services."""
 
+    @property
+    def supports_sha256_checksums(self) -> bool:
+        """Return whether uploads bind and expose provider-validated SHA-256."""
+
     def head(self, relative_key: str) -> StoredObject:
         """Return metadata for one internal relative object key."""
 
@@ -169,6 +174,12 @@ class S3ObjectStore:
 
         self.configuration = configuration
         self.client = client if client is not None else self._create_client()
+
+    @property
+    def supports_sha256_checksums(self):
+        """Return the explicitly configured provider checksum capability."""
+
+        return self.configuration.sha256_checksums
 
     def _create_client(self):
         """Create a boto3 S3 client using explicit or standard credentials."""
@@ -255,7 +266,10 @@ class S3ObjectStore:
             Size, ETag, and provider checksum metadata when available.
         """
 
-        response = self._call('head_object', Bucket=self.configuration.bucket, Key=self._key(relative_key))
+        parameters = {'Bucket': self.configuration.bucket, 'Key': self._key(relative_key)}
+        if self.supports_sha256_checksums:
+            parameters['ChecksumMode'] = 'ENABLED'
+        response = self._call('head_object', **parameters)
         return StoredObject(
             relative_key=relative_key,
             size=response['ContentLength'],
