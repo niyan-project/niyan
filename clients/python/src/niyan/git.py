@@ -98,17 +98,28 @@ def clone_dataset(*, host, dataset_path, destination, paths, stores, full_histor
                 lfs_exclude=lfs_exclude,
             ),
         )
-        configure_lfs_transfer(destination_path, environment=child_environment)
-        if not metadata_only:
+        configure_lfs_transfer(destination_path, environment=child_environment, install_filters=not metadata_only)
+        head = _run_git(
+            ['git', '-C', str(destination_path), 'rev-parse', '--verify', 'HEAD'],
+            cwd=destination_path,
+            environment=child_environment,
+            failure='Git could not inspect the cloned dataset state.',
+            capture_output=True,
+        )
+        if head.returncode not in (0, 128):
+            raise GitError('Git could not inspect the cloned dataset state.')
+        if not metadata_only and head.returncode == 0:
             _materialize_lfs(command_prefix=command_prefix, checkout=destination_path, remote='origin', include=lfs_include, exclude=lfs_exclude, environment=child_environment)
     if metadata_only:
         print('Clone complete. Git LFS content was left as pointer files.', file=output)
+    elif head.returncode == 128:
+        print('Clone complete. The dataset has no commits yet.', file=output)
     else:
         print('Clone complete.', file=output)
     return destination_path
 
 
-def configure_lfs_transfer(checkout, *, environment=None):
+def configure_lfs_transfer(checkout, *, environment=None, install_filters=False):
     """Configure Niyān's upload-only custom transfer in one managed checkout.
 
     Parameters
@@ -117,9 +128,20 @@ def configure_lfs_transfer(checkout, *, environment=None):
         Niyān dataset working tree.
     environment : mapping, optional
         Child process environment override used by tests.
+    install_filters : bool, optional
+        Ask stock Git LFS to install checkout-local clean and smudge filters.
     """
 
     child_environment = _git_environment(environment)
+    if install_filters:
+        installed = _run_git(
+            ['git', '-C', str(checkout), 'lfs', 'install', '--local', '--skip-smudge'],
+            cwd=checkout,
+            environment=child_environment,
+            failure='Git LFS could not configure checkout-local filters.',
+        )
+        if installed.returncode != 0:
+            raise GitError('Git LFS could not configure checkout-local filters.')
     settings = (
         ('lfs.customtransfer.niyan-multipart.path', 'niyan'),
         ('lfs.customtransfer.niyan-multipart.args', '_lfs-transfer'),
@@ -269,7 +291,7 @@ def push_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
         raise GitError(f'The current branch does not track the configured Niyān remote {identity.remote!r}.')
     remote_branch = upstream.removeprefix(f'{identity.remote}/') if upstream is not None else branch
 
-    configure_lfs_transfer(checkout, environment=child_environment)
+    configure_lfs_transfer(checkout, environment=child_environment, install_filters=True)
     with _authenticated_git(host=identity.host, credential=credential) as command_prefix:
         try:
             uploaded = _run_git(

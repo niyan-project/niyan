@@ -132,9 +132,6 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, cwd
 
     inspected = _infer_unambiguous_renames(root, [_inspect_candidate(root, entry) for entry in candidates.values()])
     explicit_directories = _explicit_directories(root, working_directory, paths) if not all_paths and (force_lfs or force_git) else []
-    if force_lfs and (inspected or explicit_directories):
-        _require_git_lfs()
-
     changed_attributes = set()
     for directory in explicit_directories:
         changed_attributes.add(_write_attribute_rule(root, directory, 'lfs' if force_lfs else 'git', recursive=True))
@@ -151,8 +148,9 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, cwd
             print(f"warning: {_display_path(candidate['path'])} is larger than 10 MiB but will be stored as an ordinary Git blob because --git was requested.", file=stderr or sys.stderr)
         planned.append((candidate, mode, source))
 
-    if lfs_required:
+    if lfs_required or (force_lfs and (inspected or explicit_directories)):
         _require_git_lfs()
+        configure_lfs_transfer(working_directory, install_filters=True)
     for candidate, mode, source in planned:
         if candidate['kind'] != 'regular' or mode != 'lfs' or source not in ('automatic', 'explicit-file', 'existing'):
             continue

@@ -978,7 +978,8 @@ class CliGitTests(unittest.TestCase):
         self.assertIn('--single-branch', clone_command)
         self.assertIn('--no-tags', clone_command)
         self.assertEqual(lfs_command[-5:], ['lfs', 'pull', '--include=', '--exclude=', 'origin'])
-        configured_names = [call.args[0][-2] for call in run.call_args_list[1:5]]
+        self.assertEqual(run.call_args_list[1].args[0][-4:], ['lfs', 'install', '--local', '--skip-smudge'])
+        configured_names = [call.args[0][-2] for call in run.call_args_list[2:6]]
         self.assertEqual(
             configured_names,
             [
@@ -1064,7 +1065,7 @@ class CliGitTests(unittest.TestCase):
                 stderr=io.StringIO(),
             )
 
-        self.assertEqual(run.call_count, 5)
+        self.assertEqual(run.call_count, 6)
         self.assertEqual(run.call_args_list[1].args[0][-2:], ['lfs.customtransfer.niyan-multipart.path', 'niyan'])
         identity = save_identity.call_args.args[1]
         self.assertEqual(identity.lfs_include, ('raw/**', 'labels/*.csv'))
@@ -1145,7 +1146,7 @@ class CliGitTests(unittest.TestCase):
         self.assertNotIn('NIYAN_TOKEN', run.call_args_list[0].kwargs['env'])
         self.assertNotIn('GIT_LFS_SKIP_PUSH', run.call_args_list[0].kwargs['env'])
         self.assertEqual(run.call_args_list[1].kwargs['env']['GIT_LFS_SKIP_PUSH'], '1')
-        configure.assert_called_once_with(self.root, environment={'PATH': '/usr/bin', 'GIT_LFS_SKIP_SMUDGE': '1'})
+        configure.assert_called_once_with(self.root, environment={'PATH': '/usr/bin', 'GIT_LFS_SKIP_SMUDGE': '1'}, install_filters=True)
         self.assertEqual(output.getvalue(), 'Push complete.\n')
 
     def test_first_push_creates_same_named_upstream(self):
