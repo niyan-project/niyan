@@ -10,6 +10,7 @@ from django.utils.dateparse import parse_datetime
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
 from datasets.models import Dataset
+from datasets.object_storage import ObjectStoreError
 from datasets.repositories import RepositoryDeletionError
 
 
@@ -26,10 +27,14 @@ class DatasetApiTests(TestCase):
         self.repository_root = Path(self.repository_directory.name)
         self.settings_override = override_settings(REPOSITORIES_ROOT=self.repository_root)
         self.settings_override.enable()
+        self.object_store_patcher = patch('datasets.services.S3ObjectStore')
+        self.object_store_class = self.object_store_patcher.start()
+        self.object_store = self.object_store_class.return_value
 
     def tearDown(self):
         """Restore settings before removing the temporary repository root."""
 
+        self.object_store_patcher.stop()
         self.settings_override.disable()
         self.repository_directory.cleanup()
 
@@ -295,6 +300,7 @@ class DatasetApiTests(TestCase):
         self.assertFalse(Dataset.objects.filter(pk=dataset_id).exists())
         self.assertFalse(repository_path.exists())
         self.assertEqual(self.client.get(f'/api/v1/datasets/{dataset_id}').status_code, 404)
+        self.object_store.delete_prefix.assert_called_once_with(f'datasets/{dataset_id}')
 
     def test_delete_dataset_hides_another_users_dataset(self):
         """Prevent permanent deletion without revealing private dataset existence."""
@@ -328,6 +334,21 @@ class DatasetApiTests(TestCase):
 
         self.assertEqual(retry_response.status_code, 204)
         self.assertFalse(Dataset.objects.filter(pk=dataset_id).exists())
+
+    def test_delete_dataset_keeps_record_and_repository_after_storage_failure(self):
+        """Retry irreversible deletion instead of orphaning undeleted S3 content."""
+
+        dataset_id = self.post_dataset().json()['id']
+        repository_path = self.repository_root / f'{dataset_id}.git'
+        self.object_store.delete_prefix.side_effect = ObjectStoreError('private provider detail')
+
+        response = self.client.delete(f'/api/v1/datasets/{dataset_id}')
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['code'], 'object_storage_unavailable')
+        self.assertNotIn('private provider detail', response.content.decode())
+        self.assertTrue(repository_path.exists())
+        self.assertIsNotNone(Dataset.objects.get(pk=dataset_id).deletion_started_at)
 
     def test_read_endpoints_require_authentication(self):
         """Protect list and detail reads with the router's session authentication."""

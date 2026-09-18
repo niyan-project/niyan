@@ -124,6 +124,14 @@ class CompletedPart:
             raise ValueError('An S3 multipart part requires an ETag.')
 
 
+@dataclass(frozen=True)
+class PrefixDeletionResult:
+    """Count provider resources removed beneath one trusted prefix."""
+
+    objects: int = 0
+    multipart_uploads: int = 0
+
+
 class ObjectStore(Protocol):
     """Define the metadata-only object-store boundary used by domain services."""
 
@@ -154,6 +162,9 @@ class ObjectStore(Protocol):
 
     def delete(self, relative_key: str) -> None:
         """Delete one stored object without reading it."""
+
+    def delete_prefix(self, relative_prefix: str) -> PrefixDeletionResult:
+        """Delete every object and incomplete multipart upload beneath a prefix."""
 
 
 class S3ObjectStore:
@@ -385,3 +396,62 @@ class S3ObjectStore:
         """Delete one object without downloading its bytes."""
 
         self._call('delete_object', Bucket=self.configuration.bucket, Key=self._key(relative_key))
+
+    def delete_prefix(self, relative_prefix):
+        """Delete all current objects and multipart uploads below one safe prefix."""
+
+        prefix = f'{self._key(relative_prefix)}/'
+        multipart_uploads = self._delete_multipart_prefix(prefix)
+        objects = self._delete_object_prefix(prefix)
+        return PrefixDeletionResult(objects=objects, multipart_uploads=multipart_uploads)
+
+    def _delete_multipart_prefix(self, prefix):
+        """Abort every provider multipart upload beneath a qualified prefix."""
+
+        count = 0
+        parameters = {'Bucket': self.configuration.bucket, 'Prefix': prefix}
+        while True:
+            response = self._call('list_multipart_uploads', **parameters)
+            for upload in response.get('Uploads', []):
+                key = upload.get('Key')
+                upload_id = upload.get('UploadId')
+                if not isinstance(key, str) or not key.startswith(prefix) or not upload_id:
+                    raise ObjectStoreError('Object storage returned invalid multipart metadata.')
+                try:
+                    self._call('abort_multipart_upload', Bucket=self.configuration.bucket, Key=key, UploadId=upload_id)
+                except ObjectNotFound:
+                    pass
+                count += 1
+            if not response.get('IsTruncated'):
+                return count
+            next_key_marker = response.get('NextKeyMarker')
+            next_upload_id_marker = response.get('NextUploadIdMarker')
+            if not next_key_marker or not next_upload_id_marker:
+                raise ObjectStoreError('Object storage returned invalid multipart pagination metadata.')
+            parameters['KeyMarker'] = next_key_marker
+            parameters['UploadIdMarker'] = next_upload_id_marker
+
+    def _delete_object_prefix(self, prefix):
+        """Delete every current object beneath a qualified prefix in bounded batches."""
+
+        count = 0
+        parameters = {'Bucket': self.configuration.bucket, 'Prefix': prefix}
+        while True:
+            response = self._call('list_objects_v2', **parameters)
+            keys = []
+            for stored_object in response.get('Contents', []):
+                key = stored_object.get('Key')
+                if not isinstance(key, str) or not key.startswith(prefix):
+                    raise ObjectStoreError('Object storage returned an invalid object key.')
+                keys.append(key)
+            if keys:
+                deletion = self._call('delete_objects', Bucket=self.configuration.bucket, Delete={'Objects': [{'Key': key} for key in keys], 'Quiet': True})
+                if deletion.get('Errors'):
+                    raise ObjectStoreError('Object storage could not delete every object.')
+                count += len(keys)
+            if not response.get('IsTruncated'):
+                return count
+            continuation_token = response.get('NextContinuationToken')
+            if not continuation_token:
+                raise ObjectStoreError('Object storage returned invalid object pagination metadata.')
+            parameters['ContinuationToken'] = continuation_token

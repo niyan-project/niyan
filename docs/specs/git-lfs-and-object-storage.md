@@ -99,6 +99,8 @@ Git LFS upload precedes the Git ref update, so a successful upload may remain `a
 
 Niyān ships a maintenance worker as part of the server deployment. The worker periodically claims eligible records through PostgreSQL, rechecks that they are still unreferenced, deletes their stored objects or aborts incomplete multipart uploads, and then removes their metadata. Cleanup must be retry-safe, must not require Redis or Celery in v1, and must never delete an object merely because a transient Git or object-store operation failed. Docker Compose and production deployment guidance must run this worker by default so operators do not need to create an external cron job.
 
+The server exposes the worker as the `run_lfs_maintenance` management command. Its default mode is a long-running process; `--once` performs one bounded explicit reconciliation pass and exits.
+
 This failed-push cleanup is not full repository garbage collection. Discovering objects made unreachable by branch deletion, force-push, or later history rewriting requires a complete Git reachability scan and is outside this specification. Niyān must not automatically purge those objects until that algorithm and its retention rules are separately accepted.
 
 Permanent dataset deletion must eventually delete every object and incomplete multipart upload beneath that dataset's UUID-scoped prefix before removing the final deletion state. If bucket versioning is enabled, deletion must also remove retained object versions; installations for which Niyān cannot do so must disable bucket versioning for the Niyān prefix in v1.

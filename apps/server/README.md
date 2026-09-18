@@ -16,6 +16,8 @@ The object-store adapter exposes metadata, signing, multipart-control, and delet
 
 The private bucket's CORS policy must allow the deployed web application's origins to perform the signed methods it uses. V1 transfer actions may require `GET`, `HEAD`, and `PUT`, the `Content-Length` and `x-amz-checksum-*` request headers, and access to provider `ETag` and checksum response headers. Command-line and server-to-server clients do not rely on browser CORS enforcement. Keep allowed origins deployment-specific rather than enabling provider public sharing.
 
+Run `uv run python manage.py run_lfs_maintenance` as a separate long-lived server process. It uses PostgreSQL records and row locks directly; Redis and Celery are not required. `--once` performs the same bounded reconciliation pass for explicit administration and testing. The default grace period for unreferenced uploads is seven days and the default worker interval is five minutes.
+
 ## System dependencies
 
 The server requires a Git installation that includes `git-http-backend`. Git initializes bare dataset repositories, serves smart-HTTP clone and fetch operations, and supplies authoritative repository metadata for the browsing API.

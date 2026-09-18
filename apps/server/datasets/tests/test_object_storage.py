@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from unittest import TestCase
 
 import boto3
@@ -264,3 +265,35 @@ class S3ObjectStoreTests(TestCase):
             CompletedPart(part_number=1, etag='')
         with self.assertRaises(ValueError):
             CompletedPart(part_number=1, etag='invalid\netag')
+
+    def test_delete_prefix_aborts_uploads_and_deletes_objects(self):
+        """Remove all current provider resources beneath one trusted dataset prefix."""
+
+        prefix = 'niyan/datasets/id/'
+        object_key = f'{prefix}lfs/objects/aa/aa/oid'
+        upload_key = f'{prefix}lfs/objects/bb/bb/oid'
+        self.stubber.add_response(
+            'list_multipart_uploads',
+            {'IsTruncated': False, 'Uploads': [{'Key': upload_key, 'UploadId': 'provider-upload-id', 'Initiated': datetime.now(timezone.utc)}]},
+            {'Bucket': 'datasets', 'Prefix': prefix},
+        )
+        self.stubber.add_response(
+            'abort_multipart_upload',
+            {},
+            {'Bucket': 'datasets', 'Key': upload_key, 'UploadId': 'provider-upload-id'},
+        )
+        self.stubber.add_response(
+            'list_objects_v2',
+            {'IsTruncated': False, 'Contents': [{'Key': object_key, 'Size': 12}]},
+            {'Bucket': 'datasets', 'Prefix': prefix},
+        )
+        self.stubber.add_response(
+            'delete_objects',
+            {'Deleted': [{'Key': object_key}]},
+            {'Bucket': 'datasets', 'Delete': {'Objects': [{'Key': object_key}], 'Quiet': True}},
+        )
+
+        result = self.store.delete_prefix('datasets/id')
+
+        self.assertEqual(result.objects, 1)
+        self.assertEqual(result.multipart_uploads, 1)

@@ -16,7 +16,7 @@ from datasets.models import DatasetGrant
 from datasets.policies import get_dataset_role
 from datasets.repositories import RepositoryDeletionError, RepositoryProvisioningError
 from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_visible_dataset, get_visible_dataset_by_path, list_visible_datasets, list_visible_namespace_datasets
-from datasets.services import DatasetPathConflict, create_dataset, create_dataset_grant, delete_dataset, delete_dataset_grant, update_dataset, update_dataset_grant
+from datasets.services import DatasetObjectDeletionError, DatasetPathConflict, create_dataset, create_dataset_grant, delete_dataset, delete_dataset_grant, update_dataset, update_dataset_grant
 from namespaces.models import Namespace
 
 
@@ -380,6 +380,8 @@ def delete_dataset_endpoint(request, dataset_id: UUID):
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
     except RepositoryDeletionError:
         return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be deleted.'})
+    except DatasetObjectDeletionError:
+        return Status(503, {'code': 'object_storage_unavailable', 'detail': 'The dataset objects could not be deleted.'})
 
     return Status(204, None)
 

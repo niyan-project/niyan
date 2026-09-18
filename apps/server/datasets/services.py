@@ -1,9 +1,11 @@
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
 from accounts.validators import normalize_path_slug
 from datasets.models import Dataset, DatasetGrant
+from datasets.object_storage import ObjectStoreError, S3ObjectStore
 from datasets.policies import can_create_dataset, can_delete_dataset, can_manage_dataset_grants, can_update_dataset
 from datasets.repositories import GitRepositoryStore
 from namespaces.models import Namespace
@@ -11,6 +13,10 @@ from namespaces.models import Namespace
 
 class DatasetPathConflict(ValidationError):
     """Report that a namespace path component is already in use."""
+
+
+class DatasetObjectDeletionError(RuntimeError):
+    """Report that dataset-owned object storage could not be removed safely."""
 
 
 def create_dataset(*, namespace, slug, name, created_by, repository_store=None):
@@ -121,7 +127,7 @@ def update_dataset(*, dataset, updated_by, slug=None, name=None):
     return locked_dataset
 
 
-def delete_dataset(*, dataset, deleted_by, repository_store=None):
+def delete_dataset(*, dataset, deleted_by, repository_store=None, object_store=None):
     """Permanently delete a dataset and its bare Git repository.
 
     Parameters
@@ -132,6 +138,8 @@ def delete_dataset(*, dataset, deleted_by, repository_store=None):
         Authenticated user requesting permanent deletion.
     repository_store : datasets.repositories.GitRepositoryStore, optional
         Repository boundary override for tests.
+    object_store : datasets.object_storage.ObjectStore, optional
+        Object-storage boundary override for tests.
 
     Raises
     ------
@@ -139,10 +147,11 @@ def delete_dataset(*, dataset, deleted_by, repository_store=None):
         If the user cannot delete the dataset.
     RepositoryDeletionError
         If the repository cannot be removed safely.
+    DatasetObjectDeletionError
+        If dataset-owned S3 objects or multipart uploads cannot be removed.
     """
 
     store = repository_store or GitRepositoryStore()
-
     # Persist the irreversible transition before touching storage so an interrupted request can be retried without exposing a half-deleted dataset.
     with transaction.atomic(durable=True):
         locked_dataset = Dataset.objects.select_for_update().select_related('namespace').get(pk=dataset.pk)
@@ -154,6 +163,12 @@ def delete_dataset(*, dataset, deleted_by, repository_store=None):
         if not deletion_already_started:
             locked_dataset.deletion_started_at = timezone.now()
             locked_dataset.save(update_fields=['deletion_started_at', 'updated_at'])
+
+    storage = object_store or S3ObjectStore(settings.NIYAN_S3_CONFIGURATION)
+    try:
+        storage.delete_prefix(f'datasets/{locked_dataset.id}')
+    except ObjectStoreError as error:
+        raise DatasetObjectDeletionError('Dataset object storage could not be deleted.') from error
 
     store.delete(locked_dataset.id, allow_missing=deletion_already_started)
 
