@@ -1,0 +1,26 @@
+export type Role = 'reader' | 'contributor' | 'maintainer' | 'owner'
+
+export interface ApiErrorBody { code: string, detail: string }
+export interface CurrentUser { id: number, username: string, display_name: string, email: string, is_superuser: boolean, authentication_method: 'session' | 'access_token', access_token: AccessTokenMetadata | null }
+export interface Namespace { id: string, parent_id: string | null, parent_path: string | null, path: string, slug: string, name: string, kind: 'personal' | 'group', role: Role | null, can_create_dataset: boolean, can_manage: boolean, created_at: string, updated_at: string }
+export interface NamespaceList { count: number, limit: number, offset: number, items: Namespace[] }
+export interface Dataset { id: string, namespace_id: string, namespace_path: string, slug: string, name: string, description: string, default_branch: string, role: Role, created_at: string }
+export interface DatasetList { count: number, limit: number, offset: number, items: Dataset[] }
+export interface RefItem { name: string, full_name: string, object_id: string, object_type: string }
+export interface RefList { kind: 'branches' | 'tags', limit: number, offset: number, next_offset: number | null, items: RefItem[] }
+export interface CommitItem { object_id: string, parent_ids: string[], author_name: string, author_email: string, authored_at: string, subject: string }
+export interface CommitList { resolved_commit: string, limit: number, offset: number, next_offset: number | null, items: CommitItem[] }
+export interface TreeEntry { name: string, path: string, mode: string, object_type: 'tree' | 'blob', object_id: string, size: number | null }
+export interface TreeList { resolved_commit: string, path: string, limit: number, offset: number, next_offset: number | null, items: TreeEntry[] }
+export interface BlobMetadata { resolved_commit: string, path: string, object_id: string, size: number, is_lfs: boolean, lfs_object_id: string | null, lfs_size: number | null }
+export interface Readme extends BlobMetadata { content: string }
+export interface DownloadAction { resolved_commit: string, path: string, size: number, storage: 'git' | 'lfs', method: 'GET', url: string, headers: Record<string, string>, expires_in: number | null }
+export interface Membership { id: number, namespace_id: string, user_id: number, username: string, display_name: string, role: Role, created_at: string, updated_at: string }
+export interface MembershipList { count: number, items: Membership[] }
+export interface DatasetGrant { id: number, dataset_id: string, principal_type: 'user' | 'group', principal_label: string, user_id: number | null, group_namespace_id: string | null, role: Role, created_at: string, updated_at: string }
+export interface GrantList { count: number, items: DatasetGrant[] }
+export interface UserSearchItem { id: number, username: string, display_name: string }
+export interface AccessTokenMetadata { id: string, name: string, origin: 'manual' | 'cli', fingerprint: string, resource_boundary: 'user' | 'dataset', dataset_id: string | null, dataset_path: string | null, scopes: string[], created_at: string, last_used_at: string | null, expires_at: string, revoked_at: string | null, active: boolean }
+export interface AccessTokenCreated extends AccessTokenMetadata { token: string }
+export interface AccessTokenList { count: number, items: AccessTokenMetadata[] }
+export interface DeviceAuthorization { user_code: string, name: string, scopes: string[], dataset_path: string | null, expires_at: string }

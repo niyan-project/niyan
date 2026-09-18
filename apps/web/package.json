@@ -1,0 +1,37 @@
+{
+  "name": "web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt generate",
+    "dev": "nuxt dev",
+    "preview": "npx serve .output/public",
+    "postinstall": "nuxt prepare",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "@iconify-json/lucide": "^1.2.131",
+    "@iconify-json/simple-icons": "^1.2.95",
+    "@nuxt/ui": "^4.11.1",
+    "markdown-it": "^14.1.0",
+    "nuxt": "^4.5.2",
+    "tailwindcss": "^4.3.3",
+    "vue": "3.5.42"
+  },
+  "devDependencies": {
+    "@nuxt/test-utils": "^4.0.0",
+    "@types/markdown-it": "^14.1.2",
+    "@vue/test-utils": "^2.4.6",
+    "@nuxt/eslint": "^1.17.0",
+    "eslint": "^10.10.0",
+    "eslint-plugin-better-tailwindcss": "^4.7.0",
+    "happy-dom": "^20.0.10",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.0",
+    "vitest-axe": "^0.1.0",
+    "vue-tsc": "^3.3.11"
+  },
+  "packageManager": "pnpm@12.4.1"
+}
