@@ -9,7 +9,7 @@ from niyan.config import AppPaths
 from niyan.credentials import CredentialStores
 from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
 from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, NiyanCliError
-from niyan.git import clone_dataset, credential_helper, fetch_dataset, pull_dataset
+from niyan.git import clone_dataset, credential_helper, fetch_dataset, pull_dataset, push_dataset
 from niyan.lfs_transfer import run_lfs_transfer
 from niyan.working_copy import commit_changes, restore_paths, show_diff, show_log, show_status, stage_paths
 
@@ -98,6 +98,7 @@ def build_parser():
     pull_parser.add_argument('--include', action='append', metavar='GLOB', help='Replace the saved Git LFS include selection. Repeat for multiple globs.')
     pull_parser.add_argument('--exclude', action='append', metavar='GLOB', help='Replace the saved Git LFS exclude selection. Repeat for multiple globs.')
     pull_parser.add_argument('--metadata-only', action='store_true', help='Update Git metadata and pointer files without downloading Git LFS content.')
+    commands.add_parser('push', help='Upload required Git LFS objects and publish the current dataset branch.')
 
     return parser
 
@@ -285,6 +286,9 @@ def main(argv=None):
                 metadata_only=arguments.metadata_only,
                 cwd=Path.cwd(),
             )
+            return 0
+        if arguments.command == 'push':
+            push_dataset(paths=paths, stores=stores, cwd=Path.cwd())
             return 0
         parser.error('Unsupported command.')
     except NiyanCliError as error:

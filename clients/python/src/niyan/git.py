@@ -233,6 +233,77 @@ def pull_dataset(*, paths, stores, full_history=False, include=None, exclude=Non
         print('Pull complete.', file=stderr or sys.stderr)
 
 
+def push_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
+    """Upload reachable LFS objects before publishing the current branch.
+
+    Parameters
+    ----------
+    paths : niyan.config.AppPaths
+        CLI configuration and data paths.
+    stores : niyan.credentials.CredentialStores
+        Credential storage adapters.
+    cwd : pathlib.Path, optional
+        Directory inside the Niyān checkout.
+    environment : mapping, optional
+        Parent environment override used by tests.
+    stderr : file-like object, optional
+        Human-facing progress destination.
+
+    Raises
+    ------
+    GitConflictError
+        If the remote rejects the ref update, including a non-fast-forward push.
+    GitError
+        If LFS publication fails or the push is interrupted.
+    """
+
+    checkout = Path(cwd or Path.cwd())
+    identity = _require_checkout(checkout)
+    _require_dependency('git-lfs', 'Git LFS is required to publish Niyān datasets.')
+    credential = select_credential(host=identity.host, dataset_path=identity.dataset_path, dataset_id=identity.dataset_id, paths=paths, stores=stores, cwd=checkout, environment=environment)
+    child_environment = _git_environment(environment)
+    branch = _current_branch(checkout, child_environment, operation='push')
+    _git_output(checkout, ['rev-parse', '--verify', 'HEAD'], child_environment, 'The current dataset branch has no commits to push.')
+    upstream = _optional_current_upstream(checkout, branch, child_environment)
+    if upstream is not None and not upstream.startswith(f'{identity.remote}/'):
+        raise GitError(f'The current branch does not track the configured Niyān remote {identity.remote!r}.')
+    remote_branch = upstream.removeprefix(f'{identity.remote}/') if upstream is not None else branch
+
+    configure_lfs_transfer(checkout, environment=child_environment)
+    with _authenticated_git(host=identity.host, credential=credential) as command_prefix:
+        try:
+            uploaded = _run_git(
+                [*command_prefix, '-C', str(checkout), 'lfs', 'push', identity.remote, branch],
+                cwd=checkout,
+                environment=child_environment,
+                failure='Git LFS could not publish the dataset files.',
+                capture_output=True,
+            )
+            if uploaded.returncode != 0:
+                raise GitError('Git LFS could not publish every required dataset file. The Git branch was not updated.')
+
+            # LFS was deliberately completed above. Suppress the hook's duplicate scan while preserving normal Git push behavior.
+            push_environment = dict(child_environment)
+            push_environment['GIT_LFS_SKIP_PUSH'] = '1'
+            push_arguments = ['push']
+            if upstream is None:
+                push_arguments.append('--set-upstream')
+            push_arguments.extend([identity.remote, f'{branch}:refs/heads/{remote_branch}'])
+            pushed = _run_git(
+                [*command_prefix, '-C', str(checkout), *push_arguments],
+                cwd=checkout,
+                environment=push_environment,
+                failure='Git could not publish the dataset branch.',
+                capture_output=True,
+            )
+        except KeyboardInterrupt as error:
+            raise GitError('Dataset publication was interrupted. The Git branch was not reported as published.') from error
+
+    if pushed.returncode != 0:
+        raise GitConflictError('The remote rejected the dataset branch update. Pull the latest changes and resolve any divergence before trying again.')
+    print('Push complete.', file=stderr or sys.stderr)
+
+
 def load_checkout_identity(cwd, *, validate_remote=True, run=subprocess.run):
     """Load checkout identity and optionally verify its configured Git remote.
 
@@ -366,12 +437,12 @@ def _git_output(checkout, arguments, environment, failure):
     return result.stdout.strip()
 
 
-def _current_branch(checkout, environment):
+def _current_branch(checkout, environment, *, operation='pull'):
     """Return the attached current branch or reject detached HEAD."""
 
-    branch = _git_output(checkout, ['symbolic-ref', '--quiet', '--short', 'HEAD'], environment, 'Niyān pull requires an attached current branch.')
+    branch = _git_output(checkout, ['symbolic-ref', '--quiet', '--short', 'HEAD'], environment, f'Niyān {operation} requires an attached current branch.')
     if not branch:
-        raise GitError('Niyān pull requires an attached current branch.')
+        raise GitError(f'Niyān {operation} requires an attached current branch.')
     return branch
 
 
@@ -379,6 +450,27 @@ def _current_upstream(checkout, environment):
     """Return the current branch's configured upstream ref."""
 
     return _git_output(checkout, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], environment, 'The current dataset branch has no configured upstream.')
+
+
+def _optional_current_upstream(checkout, branch, environment):
+    """Return the current upstream ref, or ``None`` for a first branch push."""
+
+    try:
+        result = subprocess.run(
+            ['git', '-C', str(checkout), 'for-each-ref', '--format=%(upstream:short)', f'refs/heads/{branch}'],
+            cwd=checkout,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise GitError('Git could not inspect the current branch upstream.') from error
+    if result.returncode != 0:
+        raise GitError('Git could not inspect the current branch upstream.')
+    upstream = result.stdout.strip()
+    return upstream or None
 
 
 def _materialize_lfs(*, command_prefix, checkout, remote, include, exclude, environment):

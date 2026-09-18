@@ -3,6 +3,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +15,7 @@ from niyan.config import AppPaths, CheckoutIdentity, Configuration, CredentialBi
 from niyan.credentials import CredentialStores, InsecureFileCredentialStore
 from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
 from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, GitError
-from niyan.git import clone_dataset, credential_helper, fetch_dataset, load_checkout_identity, pull_dataset
+from niyan.git import clone_dataset, credential_helper, fetch_dataset, load_checkout_identity, pull_dataset, push_dataset
 from niyan.http import normalize_host
 
 
@@ -1116,6 +1117,93 @@ class CliGitTests(unittest.TestCase):
             with self.assertRaises(GitConflictError):
                 pull_dataset(paths=self.paths, stores=self.stores, metadata_only=True, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
 
+    def test_push_publishes_lfs_before_the_authenticated_ref_update(self):
+        """Finish LFS publication first and suppress only the duplicate pre-push scan."""
+
+        identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+        )
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+        output = io.StringIO()
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git._require_checkout', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._git_output', return_value='0123456789abcdef'), patch('niyan.git._optional_current_upstream', return_value='origin/main'), patch('niyan.git.configure_lfs_transfer') as configure, patch('niyan.git.subprocess.run', return_value=completed) as run:
+            push_dataset(
+                paths=self.paths,
+                stores=self.stores,
+                cwd=self.root,
+                environment={'NIYAN_TOKEN': 'niyan_environment_secret', 'PATH': '/usr/bin'},
+                stderr=output,
+            )
+
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands[0][-6:], ['-C', str(self.root), 'lfs', 'push', 'origin', 'main'])
+        self.assertEqual(commands[1][-5:], ['-C', str(self.root), 'push', 'origin', 'main:refs/heads/main'])
+        self.assertNotIn('--set-upstream', commands[1])
+        self.assertNotIn('niyan_selector_secret', repr(run.call_args_list))
+        self.assertNotIn('niyan_environment_secret', repr(run.call_args_list))
+        self.assertNotIn('NIYAN_TOKEN', run.call_args_list[0].kwargs['env'])
+        self.assertNotIn('GIT_LFS_SKIP_PUSH', run.call_args_list[0].kwargs['env'])
+        self.assertEqual(run.call_args_list[1].kwargs['env']['GIT_LFS_SKIP_PUSH'], '1')
+        configure.assert_called_once_with(self.root, environment={'PATH': '/usr/bin', 'GIT_LFS_SKIP_SMUDGE': '1'})
+        self.assertEqual(output.getvalue(), 'Push complete.\n')
+
+    def test_first_push_creates_same_named_upstream(self):
+        """Create and record an origin upstream when the local branch has none."""
+
+        identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+        )
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git._require_checkout', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='experiment'), patch('niyan.git._git_output', return_value='0123456789abcdef'), patch('niyan.git._optional_current_upstream', return_value=None), patch('niyan.git.configure_lfs_transfer'), patch('niyan.git.subprocess.run', return_value=completed) as run:
+            push_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
+
+        push_command = run.call_args_list[1].args[0]
+        self.assertEqual(push_command[-6:], ['-C', str(self.root), 'push', '--set-upstream', 'origin', 'experiment:refs/heads/experiment'])
+
+    def test_failed_lfs_publication_never_attempts_a_ref_update(self):
+        """Keep the remote branch unchanged when any required LFS object is unavailable."""
+
+        identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+        )
+        failed = subprocess.CompletedProcess(args=[], returncode=1)
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git._require_checkout', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._git_output', return_value='0123456789abcdef'), patch('niyan.git._optional_current_upstream', return_value='origin/main'), patch('niyan.git.configure_lfs_transfer'), patch('niyan.git.subprocess.run', return_value=failed) as run:
+            with self.assertRaisesRegex(GitError, 'branch was not updated'):
+                push_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
+
+        self.assertEqual(run.call_count, 1)
+
+    def test_rejected_ref_update_is_a_conflict_after_lfs_success(self):
+        """Report remote concurrency or branch-policy refusal without claiming success."""
+
+        identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+        )
+        success = subprocess.CompletedProcess(args=[], returncode=0)
+        failure = subprocess.CompletedProcess(args=[], returncode=1)
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git._require_checkout', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._git_output', return_value='0123456789abcdef'), patch('niyan.git._optional_current_upstream', return_value='origin/main'), patch('niyan.git.configure_lfs_transfer'), patch('niyan.git.subprocess.run', side_effect=[success, failure]):
+            with self.assertRaises(GitConflictError):
+                push_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
+
+    def test_interrupted_lfs_publication_does_not_claim_success(self):
+        """Translate interruption into an actionable failure before any ref update."""
+
+        identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+        )
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git._require_checkout', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._git_output', return_value='0123456789abcdef'), patch('niyan.git._optional_current_upstream', return_value='origin/main'), patch('niyan.git.configure_lfs_transfer'), patch('niyan.git._run_git', side_effect=KeyboardInterrupt):
+            with self.assertRaisesRegex(GitError, 'interrupted'):
+                push_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
+
 
 class GitSynchronizationTests(unittest.TestCase):
     """Verify shallow fast-forward behavior with real local Git repositories."""
@@ -1152,6 +1240,13 @@ class GitSynchronizationTests(unittest.TestCase):
         self._git('clone', '--depth=1', '--no-tags', f'file://{self.remote}', str(self.checkout))
         self._git('-C', str(self.checkout), 'config', 'user.name', 'Niyān Test')
         self._git('-C', str(self.checkout), 'config', 'user.email', 'test@niyan.example')
+        self.fake_bin = self.root / 'bin'
+        self.fake_bin.mkdir()
+        fake_lfs = self.fake_bin / 'git-lfs'
+        fake_lfs.write_text(f'#!{sys.executable}\nraise SystemExit(0)\n')
+        fake_lfs.chmod(fake_lfs.stat().st_mode | stat.S_IXUSR)
+        self.environment = dict(os.environ)
+        self.environment['PATH'] = f'{self.fake_bin}{os.pathsep}{self.environment.get("PATH", "")}'
 
     def tearDown(self):
         """Remove all local Git fixtures."""
@@ -1192,6 +1287,38 @@ class GitSynchronizationTests(unittest.TestCase):
         self.assertEqual(self._git('-C', str(self.checkout), 'rev-parse', 'HEAD').stdout.strip(), local_commit)
         self.assertTrue((self.checkout / 'local.txt').exists())
         self.assertFalse((self.checkout / 'remote.txt').exists())
+
+    def test_push_updates_the_remote_only_after_lfs_succeeds(self):
+        """Publish a real local Git ref through the same ordered client workflow."""
+
+        (self.checkout / 'local.txt').write_text('local update\n')
+        self._git('-C', str(self.checkout), 'add', 'local.txt')
+        self._git('-C', str(self.checkout), 'commit', '-m', 'Local update')
+
+        with patch('niyan.git._require_checkout', return_value=self.identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'):
+            push_dataset(paths=self.paths, stores=self.stores, cwd=self.checkout, environment=self.environment, stderr=io.StringIO())
+
+        self.assertEqual(self._git('--git-dir', str(self.remote), 'show', 'main:local.txt').stdout, 'local update\n')
+
+    def test_non_fast_forward_push_preserves_both_local_and_remote_tips(self):
+        """Delegate expected-old-object rejection to Git without overwriting either side."""
+
+        (self.checkout / 'local.txt').write_text('local update\n')
+        self._git('-C', str(self.checkout), 'add', 'local.txt')
+        self._git('-C', str(self.checkout), 'commit', '-m', 'Local update')
+        local_commit = self._git('-C', str(self.checkout), 'rev-parse', 'HEAD').stdout.strip()
+        (self.source / 'remote.txt').write_text('remote update\n')
+        self._git('-C', str(self.source), 'add', 'remote.txt')
+        self._git('-C', str(self.source), 'commit', '-m', 'Remote update')
+        self._git('-C', str(self.source), 'push', str(self.remote), 'main')
+        remote_commit = self._git('--git-dir', str(self.remote), 'rev-parse', 'main').stdout.strip()
+
+        with patch('niyan.git._require_checkout', return_value=self.identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'):
+            with self.assertRaises(GitConflictError):
+                push_dataset(paths=self.paths, stores=self.stores, cwd=self.checkout, environment=self.environment, stderr=io.StringIO())
+
+        self.assertEqual(self._git('-C', str(self.checkout), 'rev-parse', 'HEAD').stdout.strip(), local_commit)
+        self.assertEqual(self._git('--git-dir', str(self.remote), 'rev-parse', 'main').stdout.strip(), remote_commit)
 
     def _git(self, *arguments):
         """Run one local Git fixture command."""
@@ -1280,12 +1407,14 @@ class CheckoutIdentityTests(unittest.TestCase):
 
         fetch_arguments = build_parser().parse_args(['fetch'])
         pull_arguments = build_parser().parse_args(['pull', '--full-history', '--include', 'raw/**', '--exclude', 'tmp/**', '--metadata-only'])
+        push_arguments = build_parser().parse_args(['push'])
 
         self.assertEqual(fetch_arguments.command, 'fetch')
         self.assertTrue(pull_arguments.full_history)
         self.assertEqual(pull_arguments.include, ['raw/**'])
         self.assertEqual(pull_arguments.exclude, ['tmp/**'])
         self.assertTrue(pull_arguments.metadata_only)
+        self.assertEqual(push_arguments.command, 'push')
         self.assertEqual(_error_exit_status(GitConflictError('diverged')), 6)
         self.assertEqual(_error_exit_status(GitDependencyError('missing')), 8)
 
