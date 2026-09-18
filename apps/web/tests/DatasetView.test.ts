@@ -1,0 +1,91 @@
+import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import DatasetView from '~/components/DatasetView.vue'
+import type { Dataset } from '~/types/api'
+
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
+const currentRoute = vi.hoisted(() => ({ query: { tab: 'files' } as Record<string, string>, fullPath: '/lab/images?tab=files' }))
+
+mockNuxtImport('useApi', () => () => api)
+mockNuxtImport('useRoute', () => () => currentRoute)
+
+const dataset: Dataset = {
+  id: 'dataset-id',
+  namespace_id: 'namespace-id',
+  namespace_path: 'lab',
+  slug: 'images',
+  name: 'Images',
+  description: 'Microscopy images',
+  default_branch: 'main',
+  role: 'owner',
+  created_at: '2030-01-01T00:00:00Z'
+}
+
+function installRepositoryResponses() {
+  api.get.mockImplementation((url: string) => {
+    if (url.includes('refs?kind=branches')) return Promise.resolve({ items: [{ name: 'main' }] })
+    if (url.includes('refs?kind=tags')) return Promise.resolve({ items: [{ name: 'v1' }] })
+    if (url.includes('/repository/tree?')) return Promise.resolve({ resolved_commit: 'a'.repeat(40), path: '', items: [{ name: 'notes.txt', path: 'notes.txt', mode: '100644', object_type: 'blob', object_id: 'b'.repeat(40), size: 12 }] })
+    if (url.includes('/repository/readme?')) return Promise.reject(new Error('No README'))
+    if (url.includes('/repository/blob?')) return Promise.resolve({ resolved_commit: 'a'.repeat(40), path: 'notes.txt', object_id: 'b'.repeat(40), size: 12, is_lfs: false, lfs_object_id: null, lfs_size: null })
+    if (url.includes('/repository/download?')) return Promise.resolve({ storage: 'git', method: 'GET', url: '/api/v1/datasets/dataset-id/repository/blob/raw?revision=commit&path=notes.txt', headers: {}, size: 12, resolved_commit: 'a'.repeat(40), path: 'notes.txt', expires_in: null })
+    throw new Error(`Unexpected GET ${url}`)
+  })
+}
+
+describe('dataset repository view', () => {
+  beforeEach(() => {
+    api.get.mockReset()
+    api.post.mockReset()
+    api.patch.mockReset()
+    api.delete.mockReset()
+    currentRoute.query = { tab: 'files' }
+    currentRoute.fullPath = '/lab/images?tab=files'
+    installRepositoryResponses()
+  })
+
+  it('browses repository entries and obtains an authorized action before downloading', async () => {
+    const wrapper = await mountSuspended(DatasetView, { props: { dataset }, route: '/lab/images?tab=files' })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('notes.txt')
+    const entry = wrapper.findAll('button').find(button => button.text().includes('notes.txt'))
+    expect(entry).toBeDefined()
+    await entry!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Git · 12 B')
+
+    await wrapper.findAll('button').find(button => button.text().includes('Download'))!.trigger('click')
+    await flushPromises()
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/repository/download?'))
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining(`revision=${'a'.repeat(40)}`))
+  })
+
+  it('requires the exact dataset path before permanent deletion is enabled', async () => {
+    currentRoute.query = { tab: 'settings' }
+    currentRoute.fullPath = '/lab/images?tab=settings'
+    const wrapper = await mountSuspended(DatasetView, { props: { dataset } })
+    await flushPromises()
+
+    const deleteButton = wrapper.findAll('button').find(button => button.text().includes('Delete dataset'))!
+    expect(deleteButton.attributes()).toHaveProperty('disabled')
+    const confirmation = wrapper.findAll('input').at(-1)!
+    await confirmation.setValue('lab/image')
+    expect(deleteButton.attributes()).toHaveProperty('disabled')
+    await confirmation.setValue('lab/images')
+    expect(deleteButton.attributes()).not.toHaveProperty('disabled')
+    await deleteButton.trigger('click')
+    await flushPromises()
+
+    expect(api.delete).toHaveBeenCalledWith('/api/v1/datasets/dataset-id')
+  })
+
+  it('uses semantic buttons for every repository entry so keyboard activation is native', async () => {
+    const wrapper = await mountSuspended(DatasetView, { props: { dataset }, route: '/lab/images?tab=files' })
+    await flushPromises()
+
+    const entry = wrapper.findAll('button').find(button => button.text().includes('notes.txt'))
+    expect(entry?.attributes('type')).toBe('button')
+  })
+})

@@ -8,7 +8,7 @@ const { formatDate } = useFormatting()
 const saving = ref(false)
 const showCreate = ref(false)
 const oneTimeSecret = ref('')
-const form = reactive({ name: '', scopes: ['read_api'] as string[], dataset_id: '' })
+const form = reactive({ name: '', scopes: ['read_api'] as string[], dataset_id: 'user' })
 const scopeOptions = [
   { value: 'read_api', label: 'Read API', description: 'View metadata available to your account.' },
   { value: 'api', label: 'Manage API', description: 'Create and update control-plane resources.' },
@@ -23,7 +23,7 @@ const { data: securityData, refresh } = await useAsyncData('security-access-toke
   return { tokens: tokenPage.items, datasets: datasetPage.items }
 }, { lazy: false, getCachedData: () => undefined })
 const tokens = computed(() => securityData.value?.tokens || [])
-const datasetOptions = computed(() => [{ label: 'Entire account', value: '' }, ...(securityData.value?.datasets || []).map(dataset => ({ label: `${dataset.namespace_path}/${dataset.slug}`, value: dataset.id }))])
+const datasetOptions = computed(() => [{ label: 'Entire account', value: 'user' }, ...(securityData.value?.datasets || []).map(dataset => ({ label: `${dataset.namespace_path}/${dataset.slug}`, value: dataset.id }))])
 
 function toggleScope(scope: string, checked: boolean) {
   form.scopes = checked ? [...new Set([...form.scopes, scope])] : form.scopes.filter(item => item !== scope)
@@ -32,9 +32,9 @@ function toggleScope(scope: string, checked: boolean) {
 async function createToken() {
   saving.value = true
   try {
-    const created = await api.post<AccessTokenCreated>('/api/v1/auth/tokens', { name: form.name, scopes: form.scopes, dataset_id: form.dataset_id || null })
+    const created = await api.post<AccessTokenCreated>('/api/v1/auth/tokens', { name: form.name, scopes: form.scopes, dataset_id: form.dataset_id === 'user' ? null : form.dataset_id })
     oneTimeSecret.value = created.token
-    Object.assign(form, { name: '', scopes: ['read_api'], dataset_id: '' })
+    Object.assign(form, { name: '', scopes: ['read_api'], dataset_id: 'user' })
     showCreate.value = false
     await refresh()
   } catch (error) {
