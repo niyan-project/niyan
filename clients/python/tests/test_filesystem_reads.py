@@ -3,12 +3,13 @@ import unittest
 from urllib.error import HTTPError
 
 import fsspec
+import polars
 
 from niyan.errors import ApiError
 from niyan.filesystem import NiyanFileSystem
 
 
-GIT_CONTENT = bytes(range(42))
+GIT_CONTENT = b'sample,value\nalpha,1\nbeta,2\n'
 LFS_SIZE = 5_000_000_000
 COMMIT = 'a' * 40
 LFS_OID = 'e' * 64
@@ -142,14 +143,18 @@ class FileSystemReadTests(unittest.TestCase):
         self.assertEqual(ReadApi.instances[-1].authorizations, [('dataset-id', COMMIT, 'nested/sample.csv')])
 
     def test_lfs_reads_refresh_an_expired_action_without_losing_position(self):
-        """Retry one safe range against a fresh action pinned to the same object."""
+        """Read noncontiguous multi-gigabyte ranges and safely refresh authorization."""
 
         with self.fs.open('niyan://data.example.test/lab/images/large.bin?revision=main', 'rb') as file:
+            beginning = file.read(3)
             file.seek(4_000_000_000)
             content = file.read(5)
 
+        self.assertEqual(beginning, bytes(range(3)))
         self.assertEqual(content, bytes(index % 256 for index in range(4_000_000_000, 4_000_000_005)))
         self.assertEqual(len(ReadApi.instances[-1].authorizations), 2)
+        self.assertTrue(any(request[1].startswith('bytes=0-') for request in self.opener.requests))
+        self.assertTrue(any(request[1].startswith('bytes=4000000000-') for request in self.opener.requests))
         self.assertTrue(all(request[2] is None for request in self.opener.requests))
         self.assertTrue(all(request[3] == 'required' for request in self.opener.requests))
 
@@ -173,6 +178,16 @@ class FileSystemReadTests(unittest.TestCase):
         opened = fsspec.open('niyan://data.example.test/lab/images/nested/sample.csv?revision=main', mode='rb', token='niyan_test-token', api_factory=ReadApi, transfer_opener=self.opener, block_size=4)
         with opened as file:
             self.assertEqual(file.read(4), GIT_CONTENT[:4])
+
+    def test_polars_reads_a_niyan_url_through_standard_fsspec_integration(self):
+        """Give a representative downstream consumer no Niyān-specific adapter."""
+
+        frame = polars.read_csv(
+            'niyan://data.example.test/lab/images/nested/sample.csv?revision=main',
+            storage_options={'token': 'niyan_test-token', 'api_factory': ReadApi, 'transfer_opener': self.opener, 'block_size': 4},
+        )
+
+        self.assertEqual(frame.to_dict(as_series=False), {'sample': ['alpha', 'beta'], 'value': [1, 2]})
 
 
 if __name__ == '__main__':

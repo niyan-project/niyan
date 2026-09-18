@@ -41,7 +41,8 @@ class DownloadApi:
 
     def resolve_revision(self, dataset_id, *, revision=None):
         self.revision_resolutions.append((dataset_id, revision))
-        return 200, {'dataset_id': dataset_id, 'requested_revision': revision or 'main', 'resolved_commit': COMMIT}
+        resolved_commit = COMMIT if len(self.revision_resolutions) == 1 else 'f' * 40
+        return 200, {'dataset_id': dataset_id, 'requested_revision': revision or 'main', 'resolved_commit': resolved_commit}
 
     def get_repository_blob(self, dataset_id, *, revision, path):
         if path == 'large.bin':

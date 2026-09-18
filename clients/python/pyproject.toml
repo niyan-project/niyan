@@ -21,3 +21,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/niyan"]
+
+[dependency-groups]
+dev = [
+    "polars>=1.0",
+]

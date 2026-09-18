@@ -4,7 +4,7 @@ import fsspec
 
 from niyan.config import Configuration, CredentialBinding
 from niyan.errors import ApiError
-from niyan.filesystem import NiyanFileSystem, NiyanPermissionError
+from niyan.filesystem import NiyanAuthenticationError, NiyanFileSystem, NiyanPermissionError
 
 
 class FakeFileSystemApi:
@@ -114,6 +114,18 @@ class FileSystemMetadataTests(unittest.TestCase):
 
         with self.assertRaises(NiyanPermissionError):
             fs.exists('niyan://data.example.test/lab/images')
+
+    def test_invalid_credentials_are_distinct_from_denied_private_access(self):
+        """Expose authentication failure without disclosing a private dataset."""
+
+        class UnauthenticatedApi(FakeFileSystemApi):
+            def resolve_dataset(self, locator_path):
+                raise ApiError('Invalid credential', status=401, code='authentication_required')
+
+        fs = NiyanFileSystem(token='niyan_invalid-token', api_factory=UnauthenticatedApi)
+
+        with self.assertRaises(NiyanAuthenticationError):
+            fs.ls('niyan://data.example.test/lab/images')
 
     def test_fsspec_discovers_the_installed_protocol_entry_point(self):
         """Construct Niyān through fsspec without importing CLI modules."""
