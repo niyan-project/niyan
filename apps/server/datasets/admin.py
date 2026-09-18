@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from datasets.models import Dataset, DatasetGrant, LfsMultipartUpload, LfsObject
+from datasets.models import Dataset, DatasetGrant, GitPushContext, GitPushLfsLease, GitPushRef, LfsMultipartUpload, LfsObject
 
 
 class DatasetGrantInline(admin.TabularInline):
@@ -71,3 +71,50 @@ class LfsMultipartUploadAdmin(admin.ModelAdmin):
         """Require provider-aware abort and cleanup before metadata deletion."""
 
         return False
+
+
+class ReadOnlyLifecycleAdmin(admin.ModelAdmin):
+    """Keep internal receive records inspectable but service-owned."""
+
+    def has_add_permission(self, request):
+        """Require lifecycle records to originate from receive-pack."""
+
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """Prevent manual mutation of receive evidence."""
+
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Leave lifecycle retention to maintenance services."""
+
+        return False
+
+
+@admin.register(GitPushContext)
+class GitPushContextAdmin(ReadOnlyLifecycleAdmin):
+    """Expose opaque receive authorization lifecycle for operations."""
+
+    list_display = ('id', 'dataset', 'user', 'role', 'created_at', 'expires_at', 'consumed_at', 'validated_at', 'completed_at')
+    list_filter = ('role',)
+    search_fields = ('id', 'request_id', 'dataset__slug', 'dataset__name', 'user__username')
+    list_select_related = ('dataset__namespace', 'user')
+
+
+@admin.register(GitPushRef)
+class GitPushRefAdmin(ReadOnlyLifecycleAdmin):
+    """Expose validated and accepted ref proposals for reconciliation."""
+
+    list_display = ('ref_name', 'push_context', 'old_oid', 'new_oid', 'accepted_at')
+    search_fields = ('ref_name', 'old_oid', 'new_oid', 'push_context__id')
+    list_select_related = ('push_context__dataset',)
+
+
+@admin.register(GitPushLfsLease)
+class GitPushLfsLeaseAdmin(ReadOnlyLifecycleAdmin):
+    """Expose temporary cleanup protection for verified LFS objects."""
+
+    list_display = ('push_ref', 'lfs_object', 'created_at', 'expires_at')
+    search_fields = ('push_ref__ref_name', 'lfs_object__oid', 'push_ref__push_context__id')
+    list_select_related = ('push_ref__push_context', 'lfs_object__dataset')

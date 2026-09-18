@@ -51,6 +51,11 @@ def cleanup_lfs_orphans(*, object_store=None, now=None, batch_size=100):
     deleted = 0
     failures = 0
 
+    # A failed post-receive hook must not let cleanup delete content that Git made reachable successfully.
+    from datasets.git_push import reconcile_git_pushes
+
+    reconcile_git_pushes(now=current_time, batch_size=batch_size)
+
     expired_candidates = list(
         LfsMultipartUpload.objects.filter(state=LfsMultipartUpload.State.ACTIVE, expires_at__lte=current_time)
         .order_by('expires_at', 'id')
@@ -73,7 +78,7 @@ def cleanup_lfs_orphans(*, object_store=None, now=None, batch_size=100):
     )
     for lfs_object_id in orphan_candidates:
         try:
-            if _delete_orphan(store=store, lfs_object_id=lfs_object_id, grace_cutoff=grace_cutoff):
+            if _delete_orphan(store=store, lfs_object_id=lfs_object_id, grace_cutoff=grace_cutoff, current_time=current_time):
                 deleted += 1
         except ObjectStoreError:
             failures += 1
@@ -102,7 +107,7 @@ def _abort_expired_session(*, store, session_id, lfs_object_id, current_time):
         return True
 
 
-def _delete_orphan(*, store, lfs_object_id, grace_cutoff):
+def _delete_orphan(*, store, lfs_object_id, grace_cutoff, current_time):
     """Claim, recheck, and delete one old unreferenced object."""
 
     with transaction.atomic():
@@ -114,6 +119,8 @@ def _delete_orphan(*, store, lfs_object_id, grace_cutoff):
         if lfs_object.state == LfsObject.State.AVAILABLE and (lfs_object.available_at is None or lfs_object.available_at > grace_cutoff):
             return False
         if lfs_object.multipart_uploads.filter(state=LfsMultipartUpload.State.ACTIVE).exists():
+            return False
+        if lfs_object.push_leases.filter(expires_at__gt=current_time).exists():
             return False
         try:
             store.delete(lfs_object.storage_key)

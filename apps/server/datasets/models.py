@@ -250,3 +250,75 @@ class LfsMultipartUpload(models.Model):
         """Return the public session identity without provider credentials."""
 
         return str(self.id)
+
+
+class GitPushContext(models.Model):
+    """Bind one receive-pack execution to freshly authorized server state."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE, related_name='push_contexts')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='git_push_contexts')
+    access_token = models.ForeignKey('accounts.AccessToken', on_delete=models.CASCADE, related_name='git_push_contexts')
+    role = models.CharField(max_length=16, choices=NamespaceMembership.Role.choices)
+    request_id = models.UUIDField(default=uuid.uuid4, editable=False)
+    expires_at = models.DateTimeField(editable=False)
+    consumed_at = models.DateTimeField(null=True, blank=True, editable=False)
+    validated_at = models.DateTimeField(null=True, blank=True, editable=False)
+    completed_at = models.DateTimeField(null=True, blank=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """Keep receive lifecycle timestamps internally consistent."""
+
+        constraints = [
+            models.CheckConstraint(condition=Q(validated_at__isnull=True) | Q(consumed_at__isnull=False), name='git_push_validation_requires_consumption'),
+            models.CheckConstraint(condition=Q(completed_at__isnull=True) | Q(validated_at__isnull=False), name='git_push_completion_requires_validation'),
+        ]
+
+    def __str__(self):
+        """Return the opaque context identifier for administrative inspection."""
+
+        return str(self.id)
+
+
+class GitPushRef(models.Model):
+    """Record one policy-validated ref proposal for post-receive reconciliation."""
+
+    push_context = models.ForeignKey(GitPushContext, on_delete=models.CASCADE, related_name='ref_updates')
+    ref_name = models.CharField(max_length=1024)
+    old_oid = models.CharField(max_length=64)
+    new_oid = models.CharField(max_length=64)
+    accepted_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    class Meta:
+        """Store each ref once within a receive transaction."""
+
+        constraints = [
+            models.UniqueConstraint(fields=['push_context', 'ref_name'], name='unique_ref_in_git_push'),
+        ]
+
+    def __str__(self):
+        """Return the ref name and opaque parent context."""
+
+        return f'{self.push_context_id}:{self.ref_name}'
+
+
+class GitPushLfsLease(models.Model):
+    """Protect one verified LFS object while a validated ref update is pending."""
+
+    push_ref = models.ForeignKey(GitPushRef, on_delete=models.CASCADE, related_name='lfs_leases')
+    lfs_object = models.ForeignKey(LfsObject, on_delete=models.CASCADE, related_name='push_leases')
+    expires_at = models.DateTimeField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """Deduplicate object protection within each proposed ref update."""
+
+        constraints = [
+            models.UniqueConstraint(fields=['push_ref', 'lfs_object'], name='unique_lfs_lease_in_git_push_ref'),
+        ]
+
+    def __str__(self):
+        """Return a non-secret operational lease description."""
+
+        return f'{self.push_ref_id}:{self.lfs_object_id}'

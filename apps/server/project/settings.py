@@ -86,6 +86,9 @@ WSGI_APPLICATION = 'project.wsgi.application'
 DATABASES = {
     'default': env.db('NIYAN_DATABASE_URL'),
 }
+test_database_name = env('NIYAN_TEST_DATABASE_NAME', default=None)
+if test_database_name:
+    DATABASES['default'].setdefault('TEST', {})['NAME'] = test_database_name
 
 REPOSITORIES_ROOT = Path(env('NIYAN_REPOSITORIES_ROOT')).expanduser()
 
@@ -118,6 +121,8 @@ NIYAN_LFS_MULTIPART_PART_SIZE_BYTES = env.int('NIYAN_LFS_MULTIPART_PART_SIZE_BYT
 NIYAN_LFS_MULTIPART_SESSION_LIFETIME_SECONDS = env.int('NIYAN_LFS_MULTIPART_SESSION_LIFETIME_SECONDS', default=24 * 60 * 60)
 NIYAN_LFS_ORPHAN_GRACE_PERIOD_SECONDS = env.int('NIYAN_LFS_ORPHAN_GRACE_PERIOD_SECONDS', default=7 * 24 * 60 * 60)
 NIYAN_LFS_MAINTENANCE_INTERVAL_SECONDS = env.int('NIYAN_LFS_MAINTENANCE_INTERVAL_SECONDS', default=300)
+NIYAN_GIT_PUSH_CONTEXT_LIFETIME_SECONDS = env.int('NIYAN_GIT_PUSH_CONTEXT_LIFETIME_SECONDS', default=5 * 60)
+NIYAN_GIT_PUSH_LEASE_LIFETIME_SECONDS = env.int('NIYAN_GIT_PUSH_LEASE_LIFETIME_SECONDS', default=15 * 60)
 
 if not 1 <= NIYAN_ACCESS_TOKEN_MAX_DAYS <= 365:
     raise ImproperlyConfigured('NIYAN_ACCESS_TOKEN_MAX_DAYS must be between 1 and 365.')
@@ -137,6 +142,10 @@ if NIYAN_LFS_ORPHAN_GRACE_PERIOD_SECONDS < 1:
     raise ImproperlyConfigured('NIYAN_LFS_ORPHAN_GRACE_PERIOD_SECONDS must be positive.')
 if NIYAN_LFS_MAINTENANCE_INTERVAL_SECONDS < 1:
     raise ImproperlyConfigured('NIYAN_LFS_MAINTENANCE_INTERVAL_SECONDS must be positive.')
+if not 1 <= NIYAN_GIT_PUSH_CONTEXT_LIFETIME_SECONDS <= 60 * 60:
+    raise ImproperlyConfigured('NIYAN_GIT_PUSH_CONTEXT_LIFETIME_SECONDS must be between 1 second and 1 hour.')
+if not NIYAN_GIT_PUSH_CONTEXT_LIFETIME_SECONDS <= NIYAN_GIT_PUSH_LEASE_LIFETIME_SECONDS <= 24 * 60 * 60:
+    raise ImproperlyConfigured('NIYAN_GIT_PUSH_LEASE_LIFETIME_SECONDS must be at least the push-context lifetime and no greater than 1 day.')
 
 
 # Password validation
