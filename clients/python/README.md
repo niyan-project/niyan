@@ -6,6 +6,8 @@ The CLI is the supported interface for authenticating to a Niyān installation a
 
 Repository commands require Git on `PATH`, and commands that materialize large-file content also require Git LFS. Niyān invokes both internally rather than asking users to manage dataset repositories with their CLIs. Dataset clones use depth-one, single-branch Git history by default; `niyan fetch` leaves the worktree and LFS cache unchanged, while `niyan pull` permits only fast-forward updates and then materializes the saved `--include`/`--exclude` selection. `--metadata-only` leaves LFS paths as pointer files for that invocation, and `--full-history` explicitly converts a shallow checkout to complete history.
 
+`niyan add` delegates pathspec and ignore handling to Git, stores new binary files and files larger than 10 MiB through stock Git LFS, and keeps small text in ordinary Git. `--lfs` and `--git` persist explicit standard `.gitattributes` overrides; an existing tracked file keeps its current storage mode unless the user deliberately overrides it.
+
 The initial development commands are:
 
 ```shell

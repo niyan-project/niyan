@@ -10,7 +10,7 @@ from niyan.credentials import CredentialStores
 from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
 from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper, fetch_dataset, pull_dataset
-from niyan.working_copy import commit_changes, restore_paths, show_diff, show_log, show_status
+from niyan.working_copy import commit_changes, restore_paths, show_diff, show_log, show_status, stage_paths
 
 
 def build_parser():
@@ -76,6 +76,12 @@ def build_parser():
     delete_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
 
     commands.add_parser('status', help='Show dataset working-copy and LFS state.')
+    add_parser = commands.add_parser('add', help='Stage dataset paths using Niyān’s Git LFS tracking policy.')
+    add_parser.add_argument('paths', nargs='*', help='One or more Git pathspecs to stage.')
+    add_parser.add_argument('--all', action='store_true', help='Stage every working-tree change.')
+    add_mode = add_parser.add_mutually_exclusive_group()
+    add_mode.add_argument('--lfs', action='store_true', help='Persist Git LFS tracking for selected regular files before staging.')
+    add_mode.add_argument('--git', action='store_true', help='Persist ordinary Git tracking for selected regular files before staging.')
     restore_parser = commands.add_parser('restore', help='Restore dataset paths from the index or unstage them.')
     restore_parser.add_argument('paths', nargs='+', help='One or more paths to restore.')
     restore_parser.add_argument('--staged', action='store_true', help='Unstage paths while preserving their working-tree content.')
@@ -237,6 +243,13 @@ def main(argv=None):
             return 0
         if arguments.command == 'status':
             show_status(cwd=Path.cwd())
+            return 0
+        if arguments.command == 'add':
+            if arguments.all and arguments.paths:
+                parser.error('--all cannot be combined with explicit paths.')
+            if not arguments.all and not arguments.paths:
+                parser.error('add requires at least one path or --all.')
+            stage_paths(arguments.paths, all_paths=arguments.all, force_lfs=arguments.lfs, force_git=arguments.git, cwd=Path.cwd())
             return 0
         if arguments.command == 'restore':
             restore_paths(arguments.paths, staged=arguments.staged, cwd=Path.cwd())
