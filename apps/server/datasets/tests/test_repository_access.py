@@ -5,11 +5,14 @@ import subprocess
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from uuid import uuid4
 
-from django.test import Client, LiveServerTestCase, TestCase, override_settings
+from django.test import Client, LiveServerTestCase, RequestFactory, SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
+from datasets.git_http import GitHttpBackend, RECEIVE_PACK
 from datasets.models import Dataset, DatasetGrant
 from datasets.services import create_dataset
 from namespaces.models import NamespaceMembership
@@ -203,13 +206,14 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
 
 
 class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
-    """Verify real Git clone behavior through the Django CGI adapter."""
+    """Verify real Git clone and push behavior through the Django CGI adapter."""
 
     def setUp(self):
-        """Create a repository and a read-repository access token."""
+        """Create a repository and repository access tokens."""
 
         self.create_repository_fixture()
         self.access_token, self.raw_token = create_access_token(user=self.user, name='Clone token', scopes=['read_repository'], origin=AccessToken.Origin.CLI)
+        self.write_access_token, self.write_raw_token = create_access_token(user=self.user, name='Push token', scopes=['write_repository'], origin=AccessToken.Origin.CLI)
 
     def tearDown(self):
         """Remove repository and clone fixtures."""
@@ -252,13 +256,13 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
             askpass_directory.cleanup()
             clone_directory.cleanup()
 
-    def test_git_http_rejects_missing_scope_and_receive_pack(self):
-        """Keep read transport scope-limited and reject write negotiation."""
+    def test_git_http_enforces_operation_scope_and_current_role(self):
+        """Keep read and write transport constrained by tokens and live policy."""
 
         _, wrong_scope_token = create_access_token(user=self.user, name='API token', scopes=['read_api'], origin=AccessToken.Origin.MANUAL)
         client = Client()
         wrong_scope_header = _basic_header(self.user.username, wrong_scope_token)
-        valid_header = _basic_header(self.user.username, self.raw_token)
+        read_header = _basic_header(self.user.username, self.raw_token)
 
         denied_response = client.get(
             f'/git/{self.dataset.id}.git/info/refs',
@@ -268,11 +272,94 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
         write_response = client.get(
             f'/git/{self.dataset.id}.git/info/refs',
             {'service': 'git-receive-pack'},
-            HTTP_AUTHORIZATION=valid_header,
+            HTTP_AUTHORIZATION=read_header,
+        )
+
+        collaborator = User.objects.create_user(username='collaborator')
+        DatasetGrant.objects.create(dataset=self.dataset, user=collaborator, role=NamespaceMembership.Role.READER)
+        _, reader_write_token = create_access_token(user=collaborator, name='Write-scoped reader', scopes=['write_repository'], origin=AccessToken.Origin.CLI)
+        role_response = client.get(
+            f'/git/{self.dataset.id}.git/info/refs',
+            {'service': 'git-receive-pack'},
+            HTTP_AUTHORIZATION=_basic_header(collaborator.username, reader_write_token),
         )
 
         self.assertEqual(denied_response.status_code, 403)
-        self.assertEqual(write_response.status_code, 405)
+        self.assertEqual(write_response.status_code, 403)
+        self.assertEqual(role_response.status_code, 403)
+
+    def test_git_push_uses_write_token_and_receive_pack(self):
+        """Push an ordinary fast-forward commit through Git's native protocol."""
+
+        checkout_directory = TemporaryDirectory()
+        askpass_directory = TemporaryDirectory()
+        try:
+            askpass = Path(askpass_directory.name) / 'askpass.sh'
+            askpass.write_text('#!/bin/sh\ncase "$1" in\n  *Username*) printf "%s\\n" "$NIYAN_TEST_USERNAME" ;;\n  *) printf "%s\\n" "$NIYAN_TEST_PASSWORD" ;;\nesac\n')
+            askpass.chmod(0o700)
+            destination = Path(checkout_directory.name) / 'checkout'
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    'GIT_ASKPASS': str(askpass),
+                    'GIT_TERMINAL_PROMPT': '0',
+                    'NIYAN_TEST_USERNAME': self.user.username,
+                    'NIYAN_TEST_PASSWORD': self.write_raw_token,
+                }
+            )
+            repository_url = f'{self.live_server_url.replace("http://", f"http://{self.user.username}@")}/git/{self.dataset.id}.git'
+            clone = self.run_git('-c', 'credential.helper=', 'clone', repository_url, str(destination), check=False, env=environment)
+            self.assertEqual(clone.returncode, 0, clone.stderr)
+            self.run_git('-C', str(destination), 'config', 'user.name', 'Researcher')
+            self.run_git('-C', str(destination), 'config', 'user.email', 'researcher@example.test')
+            (destination / 'notes.txt').write_text('pushed version\n')
+            self.run_git('-C', str(destination), 'add', 'notes.txt')
+            self.run_git('-C', str(destination), 'commit', '-m', 'Update notes')
+
+            push = self.run_git('-C', str(destination), '-c', 'credential.helper=', 'push', 'origin', 'main', check=False, env=environment)
+
+            self.assertEqual(push.returncode, 0, push.stderr)
+            self.assertEqual(self.run_git('--git-dir', str(self.repository_root / f'{self.dataset.id}.git'), 'show', 'main:notes.txt').stdout, 'pushed version\n')
+            self.assertNotIn(self.write_raw_token, push.stdout)
+            self.assertNotIn(self.write_raw_token, push.stderr)
+        finally:
+            askpass_directory.cleanup()
+            checkout_directory.cleanup()
+
+    def test_receive_pack_rejects_wrong_dataset_invisible_and_inactive_credentials(self):
+        """Apply credential non-disclosure rules before Git receives a request."""
+
+        other_dataset = create_dataset(namespace=self.user.personal_namespace, slug='other', name='Other', created_by=self.user)
+        _, bounded_token = create_access_token(user=self.user, name='Other only', scopes=['write_repository'], origin=AccessToken.Origin.CLI, dataset=other_dataset)
+        outsider = User.objects.create_user(username='outsider')
+        _, outsider_token = create_access_token(user=outsider, name='Outsider', scopes=['write_repository'], origin=AccessToken.Origin.CLI)
+        expired_record, expired_token = create_access_token(user=self.user, name='Expired', scopes=['write_repository'], origin=AccessToken.Origin.CLI)
+        revoked_record, revoked_token = create_access_token(user=self.user, name='Revoked', scopes=['write_repository'], origin=AccessToken.Origin.CLI)
+        AccessToken.objects.filter(pk=expired_record.pk).update(expires_at=timezone.now())
+        AccessToken.objects.filter(pk=revoked_record.pk).update(revoked_at=timezone.now())
+        client = Client()
+
+        def discover(dataset_id, token, username=self.user.username):
+            return client.get(
+                f'/git/{dataset_id}.git/info/refs',
+                {'service': 'git-receive-pack'},
+                HTTP_AUTHORIZATION=_basic_header(username, token),
+            )
+
+        wrong_boundary = discover(self.dataset.id, bounded_token)
+        invisible = discover(self.dataset.id, outsider_token, outsider.username)
+        unknown = discover(uuid4(), self.write_raw_token)
+        expired = discover(self.dataset.id, expired_token)
+        revoked = discover(self.dataset.id, revoked_token)
+
+        self.assertEqual(wrong_boundary.status_code, 403)
+        self.assertEqual(invisible.status_code, 404)
+        self.assertEqual(unknown.status_code, 404)
+        self.assertEqual(expired.status_code, 401)
+        self.assertEqual(revoked.status_code, 401)
+        self.assertEqual(expired['WWW-Authenticate'], 'Basic realm="Niyan Git"')
+        self.assertNotIn(expired_token, expired.content.decode())
+        self.assertNotIn(revoked_token, revoked.content.decode())
 
     def test_git_http_challenges_missing_credentials(self):
         """Return the standard Basic challenge required by Git clients."""
@@ -333,6 +420,37 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
         finally:
             checkout_root.cleanup()
             cli_state.cleanup()
+
+
+class GitHttpEnvironmentTests(SimpleTestCase):
+    """Verify the Git subprocess receives only deliberate non-secret metadata."""
+
+    def test_receive_pack_environment_canonicalizes_query_and_omits_credentials(self):
+        """Keep authorization and unrelated HTTP metadata outside Git and hooks."""
+
+        request = RequestFactory().get(
+            '/git/id.git/info/refs?service=git-receive-pack&untrusted=value',
+            HTTP_AUTHORIZATION='Basic private-token',
+            HTTP_GIT_PROTOCOL='version=2',
+            HTTP_X_UNTRUSTED='private-header',
+        )
+        repository_path = Path('/srv/niyan/repositories/id.git')
+
+        environment = GitHttpBackend()._environment(
+            request=request,
+            repository_path=repository_path,
+            git_path='info/refs',
+            service=RECEIVE_PACK,
+            remote_user=type('UserIdentity', (), {'pk': 42})(),
+        )
+
+        self.assertEqual(environment['QUERY_STRING'], 'service=git-receive-pack')
+        self.assertEqual(environment['HTTP_GIT_PROTOCOL'], 'version=2')
+        self.assertEqual(environment['HOME'], '/srv/niyan/repositories')
+        self.assertEqual(environment['REMOTE_USER'], '42')
+        self.assertNotIn('HTTP_AUTHORIZATION', environment)
+        self.assertNotIn('HTTP_X_UNTRUSTED', environment)
+        self.assertNotIn('private-token', environment.values())
 
 
 def _basic_header(username, token):

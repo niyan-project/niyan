@@ -7,12 +7,14 @@ from django.http import HttpResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from accounts.authentication import access_token_permits, authenticate_git_basic
-from datasets.policies import can_read_dataset
+from datasets.policies import can_read_dataset, can_write_repository
 from datasets.repositories import GitRepositoryStore, RepositoryReadError
 from datasets.models import Dataset
 
 
 ALLOWED_RESPONSE_HEADERS = {'content-type', 'content-length', 'expires', 'pragma', 'cache-control'}
+UPLOAD_PACK = 'git-upload-pack'
+RECEIVE_PACK = 'git-receive-pack'
 
 
 def git_authentication_required():
@@ -26,7 +28,7 @@ def git_authentication_required():
 
 @csrf_exempt
 def git_http_backend(request, dataset_id, git_path=''):
-    """Authorize and stream one read-only smart Git HTTP request.
+    """Authorize and stream one smart Git HTTP request.
 
     Parameters
     ----------
@@ -48,17 +50,22 @@ def git_http_backend(request, dataset_id, git_path=''):
     access_token = authenticate_git_basic(request)
     if access_token is None:
         return git_authentication_required()
-    if not access_token_permits(access_token=access_token, scope='read_repository', dataset_id=dataset_id):
-        return HttpResponse('The credential does not permit repository reads.', status=403, content_type='text/plain')
+
+    service = _requested_service(request, git_path)
+    if service is None:
+        return HttpResponse('Unsupported Git smart HTTP request.', status=405, content_type='text/plain')
+    required_scope = 'write_repository' if service == RECEIVE_PACK else 'read_repository'
+    if not access_token_permits(access_token=access_token, scope=required_scope, dataset_id=dataset_id):
+        return HttpResponse('The credential does not permit this repository operation.', status=403, content_type='text/plain')
 
     dataset = Dataset.objects.select_related('namespace__parent').filter(pk=dataset_id, deletion_started_at__isnull=True).first()
     if dataset is None or not can_read_dataset(user=access_token.user, dataset=dataset):
         return HttpResponse('Dataset repository not found.', status=404, content_type='text/plain')
-    if not _request_is_supported(request, git_path):
-        return HttpResponse('Only read-only Git smart HTTP is supported.', status=405, content_type='text/plain')
+    if service == RECEIVE_PACK and not can_write_repository(user=access_token.user, dataset=dataset):
+        return HttpResponse('The credential does not permit this repository operation.', status=403, content_type='text/plain')
 
     try:
-        return GitHttpBackend().execute(request=request, dataset=dataset, git_path=git_path, remote_user=access_token.user)
+        return GitHttpBackend().execute(request=request, dataset=dataset, git_path=git_path, service=service, remote_user=access_token.user)
     except RepositoryReadError:
         return HttpResponse('Dataset repository unavailable.', status=503, content_type='text/plain')
 
@@ -77,7 +84,7 @@ class GitHttpBackend:
 
         self.repository_store = repository_store or GitRepositoryStore()
 
-    def execute(self, *, request, dataset, git_path, remote_user):
+    def execute(self, *, request, dataset, git_path, service, remote_user):
         """Start Git's backend and return its streamed CGI response.
 
         Parameters
@@ -87,7 +94,9 @@ class GitHttpBackend:
         dataset : datasets.models.Dataset
             Dataset whose repository will be exposed.
         git_path : str
-            Validated upload-pack endpoint.
+            Validated smart-HTTP endpoint.
+        service : str
+            Validated Git service selected from the request path and query.
         remote_user : accounts.models.User
             User recorded in the CGI environment without credentials.
 
@@ -103,10 +112,15 @@ class GitHttpBackend:
         """
 
         repository_path = self.repository_store.existing_path(dataset.id)
-        environment = self._environment(request=request, repository_path=repository_path, git_path=git_path, remote_user=remote_user)
+        environment = self._environment(request=request, repository_path=repository_path, git_path=git_path, service=service, remote_user=remote_user)
+        command = ['git']
+        if service == RECEIVE_PACK:
+            # Enable receive-pack for this authorized subprocess only; never mutate repository configuration or make the service globally anonymous.
+            command.extend(['-c', 'http.receivepack=true'])
+        command.append('http-backend')
         try:
             process = subprocess.Popen(
-                ['git', 'http-backend'],
+                command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -130,7 +144,7 @@ class GitHttpBackend:
                 response[name] = value
         return response
 
-    def _environment(self, *, request, repository_path, git_path, remote_user):
+    def _environment(self, *, request, repository_path, git_path, service, remote_user):
         """Build a CGI environment without forwarding authorization data.
 
         Parameters
@@ -141,6 +155,8 @@ class GitHttpBackend:
             Verified bare repository path.
         git_path : str
             Supported endpoint beneath the repository URL.
+        service : str
+            Validated Git service selected from the endpoint.
         remote_user : accounts.models.User
             Authenticated token owner.
 
@@ -152,7 +168,7 @@ class GitHttpBackend:
 
         environment = {
             'PATH': os.environ.get('PATH', ''),
-            'HOME': os.environ.get('HOME', ''),
+            'HOME': str(repository_path.parent),
             'LANG': 'C.UTF-8',
             'GIT_CONFIG_NOSYSTEM': '1',
             'GIT_CONFIG_GLOBAL': os.devnull,
@@ -160,7 +176,7 @@ class GitHttpBackend:
             'GIT_PROJECT_ROOT': str(repository_path.parent),
             'GIT_HTTP_EXPORT_ALL': '1',
             'PATH_INFO': f'/{repository_path.name}/{git_path}',
-            'QUERY_STRING': request.META.get('QUERY_STRING', ''),
+            'QUERY_STRING': f'service={service}' if git_path == 'info/refs' else '',
             'REQUEST_METHOD': request.method,
             'CONTENT_TYPE': request.content_type or '',
             'CONTENT_LENGTH': request.META.get('CONTENT_LENGTH', ''),
@@ -267,11 +283,13 @@ class GitHttpBackend:
             process.wait()
 
 
-def _request_is_supported(request, git_path):
-    """Return whether a request is one of the two read-only smart endpoints."""
+def _requested_service(request, git_path):
+    """Return the validated smart-HTTP service selected by path and method."""
 
     if request.method == 'GET' and git_path == 'info/refs':
-        return request.GET.get('service') == 'git-upload-pack'
-    if request.method == 'POST' and git_path == 'git-upload-pack':
-        return request.content_type == 'application/x-git-upload-pack-request'
-    return False
+        service = request.GET.get('service')
+        return service if service in {UPLOAD_PACK, RECEIVE_PACK} else None
+    if request.method == 'POST' and git_path in {UPLOAD_PACK, RECEIVE_PACK}:
+        expected_content_type = f'application/x-{git_path}-request'
+        return git_path if request.content_type == expected_content_type else None
+    return None
