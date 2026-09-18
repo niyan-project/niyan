@@ -18,6 +18,8 @@ LFS_CONTENT_TYPE = 'application/vnd.git-lfs+json'
 MAX_BATCH_BODY_BYTES = 1024 * 1024
 MAX_BATCH_OBJECTS = 100
 MAX_LFS_OBJECT_SIZE = 2**63 - 1
+MAX_S3_OBJECT_SIZE = 5 * 1024**4
+MULTIPART_TRANSFER = 'niyan-multipart'
 OID_PATTERN = re.compile(r'^[0-9a-f]{64}$')
 
 
@@ -79,16 +81,22 @@ def lfs_batch(request, dataset_id):
     if not allowed:
         return _lfs_response({'message': 'Dataset repository not found.'}, status=404)
 
+    try:
+        transfer = _select_transfer(payload)
+    except InvalidLfsBatch as error:
+        return _lfs_response({'message': str(error)}, status=error.status)
     objects = [
         _negotiate_object(
             dataset=dataset,
             operation=operation,
             requested=requested,
+            transfer=transfer,
             verify_url=request.build_absolute_uri(reverse('git-lfs-verify', kwargs={'dataset_id': dataset.id, 'oid': requested['oid']})),
+            multipart_url=request.build_absolute_uri(f'/api/v1/datasets/{dataset.id}/lfs/objects/{requested["oid"]}/multipart'),
         )
         for requested in payload['objects']
     ]
-    return _lfs_response({'transfer': 'basic', 'hash_algo': 'sha256', 'objects': objects})
+    return _lfs_response({'transfer': transfer, 'hash_algo': 'sha256', 'objects': objects})
 
 
 @csrf_exempt
@@ -165,8 +173,8 @@ def _parse_batch_request(request):
     transfers = payload.get('transfers', ['basic'])
     if not isinstance(transfers, list) or not transfers or any(not isinstance(transfer, str) for transfer in transfers):
         raise InvalidLfsBatch('The transfers field must be a non-empty list of names.')
-    if 'basic' not in transfers:
-        raise InvalidLfsBatch('The client must support the basic Git LFS transfer adapter.')
+    if not {'basic', MULTIPART_TRANSFER}.intersection(transfers):
+        raise InvalidLfsBatch('The client did not advertise a supported Git LFS transfer adapter.')
 
     objects = payload.get('objects')
     if not isinstance(objects, list):
@@ -184,7 +192,25 @@ def _parse_batch_request(request):
         if isinstance(size, bool) or not isinstance(size, int) or size < 0 or size > MAX_LFS_OBJECT_SIZE:
             raise InvalidLfsBatch('Every object size must be a non-negative integer.')
         normalized_objects.append({'oid': oid, 'size': size})
-    return {'operation': operation, 'objects': normalized_objects}
+    return {'operation': operation, 'objects': normalized_objects, 'transfers': transfers}
+
+
+def _select_transfer(payload):
+    """Select a client-advertised transfer according to object sizes."""
+
+    transfers = payload['transfers']
+    if payload['operation'] == 'download':
+        if 'basic' not in transfers:
+            raise InvalidLfsBatch('Downloads require the basic Git LFS transfer adapter.')
+        return 'basic'
+    requires_multipart = any(requested['size'] >= settings.NIYAN_LFS_MULTIPART_THRESHOLD_BYTES for requested in payload['objects'])
+    if requires_multipart and MULTIPART_TRANSFER in transfers:
+        return MULTIPART_TRANSFER
+    if 'basic' in transfers:
+        return 'basic'
+    if MULTIPART_TRANSFER in transfers:
+        return MULTIPART_TRANSFER
+    raise InvalidLfsBatch('The client did not advertise a supported upload transfer adapter.')
 
 
 def _parse_verify_request(request, *, route_oid):
@@ -214,18 +240,18 @@ def _parse_verify_request(request, *, route_oid):
     return {'size': size}
 
 
-def _negotiate_object(*, dataset, operation, requested, verify_url):
+def _negotiate_object(*, dataset, operation, requested, transfer, verify_url, multipart_url):
     """Negotiate one object without exposing storage or policy internals."""
 
     oid = requested['oid']
     size = requested['size']
     response = {'oid': oid, 'size': size, 'authenticated': True}
     if operation == 'upload':
-        return _negotiate_upload(dataset=dataset, oid=oid, size=size, response=response, verify_url=verify_url)
+        return _negotiate_upload(dataset=dataset, oid=oid, size=size, response=response, transfer=transfer, verify_url=verify_url, multipart_url=multipart_url)
     return _negotiate_download(dataset=dataset, oid=oid, size=size, response=response)
 
 
-def _negotiate_upload(*, dataset, oid, size, response, verify_url):
+def _negotiate_upload(*, dataset, oid, size, response, transfer, verify_url, multipart_url):
     """Reuse verified content or authorize one bounded basic upload."""
 
     try:
@@ -236,8 +262,13 @@ def _negotiate_upload(*, dataset, oid, size, response, verify_url):
         return _object_error(response, 422, 'The declared object size conflicts with existing metadata.')
     if lfs_object.state in {LfsObject.State.AVAILABLE, LfsObject.State.REFERENCED}:
         return response
+    if size > MAX_S3_OBJECT_SIZE:
+        return _object_error(response, 422, 'This object exceeds the supported S3 object size.')
     if size >= settings.NIYAN_LFS_MULTIPART_THRESHOLD_BYTES:
-        return _object_error(response, 422, 'This object requires the Niyān multipart transfer agent.')
+        if transfer != MULTIPART_TRANSFER:
+            return _object_error(response, 422, 'This object requires the Niyān multipart transfer agent.')
+        response['actions'] = {'upload': {'href': multipart_url}, 'verify': {'href': verify_url}}
+        return response
     try:
         action = issue_upload_action(lfs_object=lfs_object)
     except (LfsTransferUnavailable, ObjectStoreError):

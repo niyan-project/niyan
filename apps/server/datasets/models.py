@@ -178,3 +178,75 @@ class LfsObject(models.Model):
         """Return a concise dataset-scoped object description."""
 
         return f'{self.dataset_id}:{self.oid}'
+
+
+class LfsMultipartUpload(models.Model):
+    """Persist one opaque provider multipart session for a Git LFS object."""
+
+    class State(models.TextChoices):
+        """Describe whether the provider upload still accepts control operations."""
+
+        ACTIVE = 'active', 'Active'
+        COMPLETED = 'completed', 'Completed'
+        ABORTED = 'aborted', 'Aborted'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    lfs_object = models.ForeignKey(LfsObject, on_delete=models.CASCADE, related_name='multipart_uploads')
+    provider_upload_id = models.TextField(editable=False)
+    part_size = models.PositiveBigIntegerField(editable=False)
+    state = models.CharField(max_length=10, choices=State.choices, default=State.ACTIVE)
+    expires_at = models.DateTimeField(editable=False)
+    completed_at = models.DateTimeField(null=True, blank=True, editable=False)
+    aborted_at = models.DateTimeField(null=True, blank=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Permit at most one active provider upload for an object."""
+
+        constraints = [
+            models.UniqueConstraint(fields=['lfs_object'], condition=Q(state='active'), name='unique_active_multipart_upload'),
+            models.CheckConstraint(
+                condition=(
+                    Q(state='active', completed_at__isnull=True, aborted_at__isnull=True)
+                    | Q(state='completed', completed_at__isnull=False, aborted_at__isnull=True)
+                    | Q(state='aborted', completed_at__isnull=True, aborted_at__isnull=False)
+                ),
+                name='multipart_upload_state_timestamps_consistent',
+            ),
+        ]
+
+    @property
+    def expected_part_count(self):
+        """Return the exact number of parts implied by size and part size."""
+
+        return max(1, (self.lfs_object.size + self.part_size - 1) // self.part_size)
+
+    def expected_part_size(self, part_number):
+        """Return the required byte length for one numbered part.
+
+        Parameters
+        ----------
+        part_number : int
+            One-based S3 multipart part number.
+
+        Returns
+        -------
+        int
+            Exact byte length for the requested part.
+
+        Raises
+        ------
+        ValueError
+            If the part number lies outside this upload's layout.
+        """
+
+        if part_number < 1 or part_number > self.expected_part_count:
+            raise ValueError('The multipart part number is outside this upload.')
+        offset = (part_number - 1) * self.part_size
+        return min(self.part_size, self.lfs_object.size - offset)
+
+    def __str__(self):
+        """Return the public session identity without provider credentials."""
+
+        return str(self.id)

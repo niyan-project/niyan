@@ -52,6 +52,12 @@ If a required multipart upload comes from a client that does not advertise `niya
 
 The custom agent must request multipart initiation and signed part actions from Niyān, upload parts directly to object storage, complete the provider multipart upload, and notify Niyān of completion before reporting success to Git LFS. It must support bounded concurrency, incremental progress, retries of individual parts, and abort after a terminal failure. Raw storage credentials must never be returned to the agent.
 
+For an upload batch using `niyan-multipart`, each large object's `upload` action points to its versioned Niyān REST initiation endpoint. The custom agent reads the same access token selected by the surrounding Niyān checkout and authenticates multipart initiation, part-action, completion, and abort requests with the Bearer scheme. The Batch response never embeds that long-lived token. Every multipart-control request rechecks token validity, `write_repository` scope, its optional dataset boundary, and the user's current contributor-or-higher role.
+
+The REST contract is rooted at `/api/v1/datasets/<dataset-uuid>/lfs/objects/<oid>/multipart`. Initiation returns an opaque Niyān session UUID, exact server-selected part size and count, and expiry. Part-action requests address a one-based part number and exact byte size. Completion submits the ordered provider ETags and optional provider checksum metadata; abort addresses the opaque session UUID. Provider upload identifiers, storage keys, and credentials remain private server state.
+
+If one upload batch requires multipart and advertises `niyan-multipart`, the server selects it for the whole batch. Smaller objects in that batch may retain ordinary signed single-PUT actions; the custom agent must execute those actions correctly. Multipart content parts always travel directly from the custom agent to signed object-store URLs. Django receives only bounded control metadata.
+
 ## Signed Transfer Actions
 
 Django authenticates, authorizes, and orchestrates transfers but never proxies large-object bytes. Upload and download actions point directly to the configured private S3-compatible storage service. Multipart coordination endpoints may return signed actions for individual parts without returning storage credentials.

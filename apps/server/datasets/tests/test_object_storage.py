@@ -214,13 +214,14 @@ class S3ObjectStoreTests(TestCase):
         self.stubber.add_response('delete_object', {}, {'Bucket': 'datasets', 'Key': provider_key})
 
         upload_id = self.store.initiate_multipart(key, checksum_algorithm='crc32c')
-        part_action = self.store.presign_upload_part(key, upload_id=upload_id, part_number=1, expires_in=300)
+        part_action = self.store.presign_upload_part(key, upload_id=upload_id, part_number=1, size=12, expires_in=300)
         stored_object = self.store.complete_multipart(key, upload_id=upload_id, parts=[CompletedPart(part_number=1, etag='"part-etag"', checksum_crc32c='part-checksum')])
         self.store.abort_multipart(key, upload_id='other-upload-id')
         self.store.delete(key)
 
         self.assertEqual(upload_id, 'upload-id')
         self.assertEqual(part_action.method, 'PUT')
+        self.assertEqual(part_action.headers, {'Content-Length': '12'})
         self.assertIn('uploadId=upload-id', part_action.url)
         self.assertIn('partNumber=1', part_action.url)
         self.assertEqual(stored_object.size, 12)
@@ -239,8 +240,9 @@ class S3ObjectStoreTests(TestCase):
             lambda: self.store.presign_download('object', expires_in=3601),
             lambda: self.store.presign_upload('object', size=-1),
             lambda: self.store.initiate_multipart('object', checksum_algorithm='md5'),
-            lambda: self.store.presign_upload_part('object', upload_id='', part_number=1),
-            lambda: self.store.presign_upload_part('object', upload_id='upload-id', part_number=0),
+            lambda: self.store.presign_upload_part('object', upload_id='', part_number=1, size=1),
+            lambda: self.store.presign_upload_part('object', upload_id='upload-id', part_number=0, size=1),
+            lambda: self.store.presign_upload_part('object', upload_id='upload-id', part_number=1, size=0),
             lambda: self.store.complete_multipart('object', upload_id='upload-id', parts=[]),
             lambda: self.store.complete_multipart(
                 'object',
@@ -260,3 +262,5 @@ class S3ObjectStoreTests(TestCase):
             CompletedPart(part_number=0, etag='"etag"')
         with self.assertRaises(ValueError):
             CompletedPart(part_number=1, etag='')
+        with self.assertRaises(ValueError):
+            CompletedPart(part_number=1, etag='invalid\netag')

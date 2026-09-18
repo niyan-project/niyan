@@ -120,7 +120,7 @@ class CompletedPart:
 
         if self.part_number < 1 or self.part_number > 10_000:
             raise ValueError('An S3 multipart part number must be between 1 and 10000.')
-        if not self.etag:
+        if not self.etag or len(self.etag) > 1024 or any(character in self.etag for character in {'\r', '\n'}):
             raise ValueError('An S3 multipart part requires an ETag.')
 
 
@@ -143,7 +143,7 @@ class ObjectStore(Protocol):
     def initiate_multipart(self, relative_key: str, *, checksum_algorithm: str | None = None) -> str:
         """Start a provider multipart upload and return its opaque identifier."""
 
-    def presign_upload_part(self, relative_key: str, *, upload_id: str, part_number: int, expires_in: int = 900) -> PresignedAction:
+    def presign_upload_part(self, relative_key: str, *, upload_id: str, part_number: int, size: int, expires_in: int = 900, checksum_sha256: str | None = None) -> PresignedAction:
         """Authorize one direct multipart part upload."""
 
     def complete_multipart(self, relative_key: str, *, upload_id: str, parts: list[CompletedPart]) -> StoredObject:
@@ -246,7 +246,7 @@ class S3ObjectStore:
             return getattr(self.client, operation)(**parameters)
         except ClientError as error:
             error_code = str(error.response.get('Error', {}).get('Code', ''))
-            if error_code in {'404', 'NoSuchKey', 'NotFound'}:
+            if error_code in {'404', 'NoSuchKey', 'NoSuchUpload', 'NotFound'}:
                 raise ObjectNotFound('The stored object is unavailable.') from error
             raise ObjectStoreError('The object-storage operation failed.') from error
         except BotoCoreError as error:
@@ -323,19 +323,27 @@ class S3ObjectStore:
             raise ObjectStoreError('Object storage did not create a multipart upload.')
         return upload_id
 
-    def presign_upload_part(self, relative_key, *, upload_id, part_number, expires_in=900):
+    def presign_upload_part(self, relative_key, *, upload_id, part_number, size, expires_in=900, checksum_sha256=None):
         """Return a short-lived direct PUT action for one multipart part."""
 
         if not upload_id:
             raise ValueError('A multipart upload identifier is required.')
         if part_number < 1 or part_number > 10_000:
             raise ValueError('An S3 multipart part number must be between 1 and 10000.')
+        if size < 1:
+            raise ValueError('An S3 multipart part size must be positive.')
+        parameters = {'UploadId': upload_id, 'PartNumber': part_number, 'ContentLength': size}
+        headers = {'Content-Length': str(size)}
+        if checksum_sha256:
+            parameters['ChecksumSHA256'] = checksum_sha256
+            headers['x-amz-checksum-sha256'] = checksum_sha256
         return self._presign(
             'upload_part',
             'PUT',
             relative_key,
             expires_in=expires_in,
-            parameters={'UploadId': upload_id, 'PartNumber': part_number},
+            parameters=parameters,
+            headers=headers,
         )
 
     def complete_multipart(self, relative_key, *, upload_id, parts):

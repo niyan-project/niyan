@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from datasets.models import Dataset, DatasetGrant, LfsObject
+from datasets.models import Dataset, DatasetGrant, LfsMultipartUpload, LfsObject
 
 
 class DatasetGrantInline(admin.TabularInline):
@@ -48,5 +48,26 @@ class LfsObjectAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         """Require lifecycle services to coordinate metadata and object deletion."""
+
+        return False
+
+
+@admin.register(LfsMultipartUpload)
+class LfsMultipartUploadAdmin(admin.ModelAdmin):
+    """Expose multipart lifecycle state without provider upload credentials."""
+
+    list_display = ('id', 'lfs_object', 'state', 'part_size', 'expires_at', 'created_at', 'completed_at', 'aborted_at')
+    list_filter = ('state',)
+    search_fields = ('id', 'lfs_object__oid', 'lfs_object__dataset__name', 'lfs_object__dataset__slug')
+    readonly_fields = ('id', 'lfs_object', 'part_size', 'state', 'expires_at', 'completed_at', 'aborted_at', 'created_at', 'updated_at')
+    list_select_related = ('lfs_object__dataset__namespace',)
+
+    def has_add_permission(self, request):
+        """Require multipart initiation through the authenticated service."""
+
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Require provider-aware abort and cleanup before metadata deletion."""
 
         return False
