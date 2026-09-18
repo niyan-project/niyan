@@ -112,6 +112,10 @@ Do not invent formatter, package-manager, migration, or test commands before the
 ### Web
 
 - Use TypeScript and Vue Composition API conventions supported by the checked-in Nuxt configuration.
+- Use Nuxt UI components wherever they fit and Tailwind CSS utilities for ordinary layout and styling. Add custom CSS only for semantic theme tokens, untrusted-content or viewer isolation, or a layout that the established utilities cannot express clearly.
+- Preserve the accepted Indigo primary palette and neutral Zinc-like surfaces in both light and dark modes. Do not tint broad dark-mode surfaces with the primary color.
+- Call Niyān namespace records "groups" in user-facing interfaces except where the internal/API term is necessary for precision.
+- Do not introduce public-repository badges, stars, followers, activity feeds, or other social-forge concepts.
 - Keep authorization and integrity decisions on the server; the UI may explain policy but may not enforce it alone.
 - Build repository browsing around Git concepts already present in the domain rather than inventing parallel dataset-version terminology.
 - Treat rendered README files and viewer output as untrusted content.
