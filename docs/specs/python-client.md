@@ -90,7 +90,9 @@ Full-file downloads must stream into a temporary or explicitly partial local des
 
 When an expected Git LFS SHA-256 object identifier is available, a complete download should verify it incrementally before finalizing the file. Partial and ranged reads cannot claim whole-object verification. Size and resolved revision metadata must remain available to callers that need their own checks.
 
-Resume behavior, overwrite policy, local permissions, preservation of modification times, and parallel recursive-download limits require separate decisions and tests against real HPC filesystems.
+`get_file` and recursive `get` write a sibling `<destination>.niyan-part` file and use an atomic local replace only after the expected size and, for Git LFS content, SHA-256 identifier have been verified. Existing final files are replaced by default only after that verification. `overwrite=False` fails before transfer and rechecks immediately before publication. Failed transfers retain the recognizable partial artifact by default for diagnosis; `keep_partial=False` removes it. V1 does not resume a retained partial artifact.
+
+Parent directories are created as needed. New files use the process and filesystem's ordinary creation permissions and umask; Niyān does not preserve repository modification times or executable bits on downloaded dataset content. Recursive downloads are serial in v1 and place the selected directory's contents beneath the caller's destination. The entire traversal and every child authorization remain pinned to the single commit resolved at the start. Parallel recursive transfer and resumable partial artifacts may be added later without weakening these publication and integrity guarantees.
 
 ## Authentication
 

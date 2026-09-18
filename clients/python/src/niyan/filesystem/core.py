@@ -1,16 +1,20 @@
 """Read-only fsspec metadata access for Niyān datasets."""
 
+from collections.abc import Iterator
+import hashlib
+import hmac
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener
 
+from fsspec.callbacks import DEFAULT_CALLBACK
 from fsspec.spec import AbstractBufferedFile, AbstractFileSystem
 
 from niyan.errors import ApiError, ConfigurationError, CredentialError
-from niyan.filesystem.errors import NiyanAuthenticationError, NiyanCompatibilityError, NiyanNotFoundError, NiyanPermissionError, NiyanTransferError
+from niyan.filesystem.errors import NiyanAuthenticationError, NiyanCompatibilityError, NiyanIntegrityError, NiyanNotFoundError, NiyanPermissionError, NiyanTransferError
 from niyan.filesystem.path import canonical_name, options_from_url, parse_location, strip_protocol
 from niyan.http import ApiClient, SameOriginRedirectHandler, normalize_host
 
@@ -207,6 +211,70 @@ class NiyanFileSystem(AbstractFileSystem):
         content, _ = self._read_action_range(context=context, action=action, start=normalized_start, end=normalized_end)
         return content
 
+    def get_file(self, rpath: str, lpath: str | os.PathLike[str] | None = None, callback: Any = DEFAULT_CALLBACK, outfile: Any = None, *, overwrite: bool = True, keep_partial: bool = True, chunk_size: int | None = None, **kwargs: Any) -> None:
+        """Download one file incrementally and publish it through atomic replace.
+
+        Parameters
+        ----------
+        rpath : str
+            Niyān file URL or repository-relative path.
+        lpath : path-like, optional
+            Final local destination.
+        callback : fsspec.callbacks.Callback, optional
+            Progress callback updated with transferred bytes.
+        outfile : file-like, optional
+            Unsupported because it cannot provide atomic publication.
+        overwrite : bool, optional
+            Replace an existing file after successful verification.
+        keep_partial : bool, optional
+            Retain the sibling ``.niyan-part`` artifact after failure.
+        chunk_size : int, optional
+            Maximum bytes requested and held for each transfer range.
+        **kwargs
+            Reserved fsspec arguments.
+        """
+
+        if outfile is not None or lpath is None:
+            raise NotImplementedError('Niyān atomic downloads require a local destination path.')
+        context = self._resolve(rpath)
+        if not context.repository_path:
+            raise IsADirectoryError(rpath)
+        self._require_read_capabilities(host=context.host, api=context.api)
+        action = self._authorize_context(context)
+        self._download_context(context=context, action=action, destination=Path(lpath), callback=callback, overwrite=overwrite, keep_partial=keep_partial, chunk_size=chunk_size or self.block_size)
+
+    def get(self, rpath: str, lpath: str | os.PathLike[str], recursive: bool = False, callback: Any = DEFAULT_CALLBACK, maxdepth: int | None = None, *, overwrite: bool = True, keep_partial: bool = True, chunk_size: int | None = None, **kwargs: Any) -> None:
+        """Download one file or a recursively selected directory at one commit."""
+
+        if not isinstance(rpath, str):
+            raise TypeError('Niyān recursive downloads accept one source path at a time.')
+        context = self._resolve(rpath)
+        self._require_read_capabilities(host=context.host, api=context.api)
+        if self._context_is_file(context):
+            action = self._authorize_context(context)
+            self._download_context(context=context, action=action, destination=Path(lpath), callback=callback, overwrite=overwrite, keep_partial=keep_partial, chunk_size=chunk_size or self.block_size)
+            return
+        if not recursive:
+            raise IsADirectoryError(rpath)
+
+        files = list(self._walk_files(context, maxdepth=maxdepth))
+        destination_root = Path(lpath)
+        destination_root.mkdir(parents=True, exist_ok=True)
+        callback.set_size(len(files))
+        source_root = PurePosixPath(context.repository_path)
+        for repository_path in files:
+            try:
+                relative_path = PurePosixPath(repository_path).relative_to(source_root) if context.repository_path else PurePosixPath(repository_path)
+            except ValueError:
+                raise NiyanTransferError('Niyān returned a repository path outside the selected directory.') from None
+            safe_parts = _safe_local_parts(relative_path)
+            destination = destination_root.joinpath(*safe_parts)
+            child_context = context.with_repository_path(repository_path)
+            action = self._authorize_context(child_context)
+            child_callback = callback.branched(repository_path, str(destination))
+            self._download_context(context=child_context, action=action, destination=destination, callback=child_callback, overwrite=overwrite, keep_partial=keep_partial, chunk_size=chunk_size or self.block_size)
+            callback.relative_update(1)
+
     def _resolve(self, path: str) -> '_ResolvedPath':
         """Resolve host, credential, dataset boundary, and exact commit lazily."""
 
@@ -241,6 +309,81 @@ class NiyanFileSystem(AbstractFileSystem):
         if parsed_url.scheme not in ('http', 'https') or not parsed_url.netloc or parsed_url.username or parsed_url.password:
             raise NiyanTransferError('Niyān returned an invalid file transfer action.')
         return action
+
+    def _context_is_file(self, context: '_ResolvedPath') -> bool:
+        """Distinguish a pinned file from a pinned directory."""
+
+        if not context.repository_path:
+            return False
+        try:
+            self._call(context.api.get_repository_blob, context.dataset_id, revision=context.resolved_commit, path=context.repository_path)
+            return True
+        except NiyanNotFoundError as error:
+            if error.resource_kind != 'path':
+                raise
+            self._call(context.api.list_repository_tree, context.dataset_id, revision=context.resolved_commit, path=context.repository_path, limit=1, offset=0)
+            return False
+
+    def _walk_files(self, context: '_ResolvedPath', *, maxdepth: int | None) -> Iterator[str]:
+        """Yield repository file paths beneath one exact commit."""
+
+        pending = [(context.repository_path, 0)]
+        while pending:
+            directory, depth = pending.pop()
+            offset = 0
+            while True:
+                _, page = self._call(context.api.list_repository_tree, context.dataset_id, revision=context.resolved_commit, path=directory, limit=100, offset=offset)
+                for entry in page['items']:
+                    if entry['object_type'] == 'tree':
+                        if maxdepth is None or depth < maxdepth:
+                            pending.append((str(entry['path']), depth + 1))
+                    elif entry['object_type'] == 'blob':
+                        yield str(entry['path'])
+                    else:
+                        raise NiyanCompatibilityError('The selected Git tree contains an unsupported non-file entry.')
+                next_offset = page.get('next_offset')
+                if next_offset is None:
+                    break
+                offset = int(next_offset)
+
+    def _download_context(self, *, context: '_ResolvedPath', action: dict[str, Any], destination: Path, callback: Any, overwrite: bool, keep_partial: bool, chunk_size: int) -> None:
+        """Stream, verify, and atomically publish one exact file."""
+
+        if chunk_size < 1:
+            raise ValueError('Niyān download chunk_size must be positive.')
+        if destination.exists() and not overwrite:
+            raise FileExistsError(destination)
+        if destination.exists() and destination.is_dir():
+            raise IsADirectoryError(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        partial = destination.with_name(f'{destination.name}.niyan-part')
+        expected_size = int(action['size'])
+        digest = hashlib.sha256() if action['storage'] == 'lfs' else None
+        callback.set_size(expected_size)
+        transferred = 0
+        try:
+            with partial.open('wb') as output:
+                while transferred < expected_size:
+                    end = min(expected_size, transferred + chunk_size)
+                    content, action = self._read_action_range(context=context, action=action, start=transferred, end=end)
+                    output.write(content)
+                    if digest is not None:
+                        digest.update(content)
+                    transferred += len(content)
+                    callback.relative_update(len(content))
+                output.flush()
+                os.fsync(output.fileno())
+            if transferred != expected_size:
+                raise NiyanIntegrityError('The downloaded file size does not match its immutable metadata.')
+            if digest is not None and not hmac.compare_digest(digest.hexdigest(), str(action['lfs_object_id'])):
+                raise NiyanIntegrityError('The downloaded file does not match its Git LFS SHA-256 identifier.')
+            if destination.exists() and not overwrite:
+                raise FileExistsError(destination)
+            os.replace(partial, destination)
+        except Exception:
+            if not keep_partial:
+                partial.unlink(missing_ok=True)
+            raise
 
     def _read_action_range(self, *, context: '_ResolvedPath', action: dict[str, Any], start: int, end: int, allow_refresh: bool = True) -> tuple[bytes, dict[str, Any]]:
         """Read one exact range and safely refresh an expired LFS action once."""
@@ -377,6 +520,11 @@ class _ResolvedPath:
         self.repository_path = repository_path
         self.resolved_commit = resolved_commit
 
+    def with_repository_path(self, repository_path: str) -> '_ResolvedPath':
+        """Return child context pinned to the same dataset commit."""
+
+        return _ResolvedPath(api=self.api, token=self.token, host=self.host, dataset_id=self.dataset_id, dataset_path=self.dataset_path, repository_path=repository_path, resolved_commit=self.resolved_commit)
+
 
 class _NiyanBufferedFile(AbstractBufferedFile):
     """Bind an fsspec file handle to one exact commit and transfer action."""
@@ -409,3 +557,11 @@ def _require_same_object(previous: dict[str, Any], refreshed: dict[str, Any]) ->
     identity_fields = ('resolved_commit', 'path', 'size', 'object_id', 'lfs_object_id', 'storage')
     if any(previous.get(field) != refreshed.get(field) for field in identity_fields):
         raise NiyanTransferError('Niyān refreshed the transfer action with inconsistent object metadata.')
+
+
+def _safe_local_parts(path: PurePosixPath) -> tuple[str, ...]:
+    """Return repository path components that cannot escape a destination."""
+
+    if path.is_absolute() or not path.parts or any(part in ('', '.', '..') for part in path.parts):
+        raise NiyanTransferError('Niyān returned an unsafe repository path for recursive download.')
+    return path.parts
