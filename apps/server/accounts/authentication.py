@@ -2,7 +2,7 @@ import base64
 import binascii
 
 from ninja.errors import AuthorizationError
-from ninja.security import HttpBearer, django_auth
+from ninja.security import HttpBearer, SessionAuth
 
 from accounts.models import AccessToken
 from accounts.tokens import InvalidAccessToken, access_token_allows_scope, authenticate_access_token
@@ -36,7 +36,20 @@ class AccessTokenBearer(HttpBearer):
 
 
 access_token_bearer = AccessTokenBearer()
-session_or_access_token = [django_auth, access_token_bearer]
+
+
+class OptionalSessionAuth(SessionAuth):
+    """Check CSRF only when a request actually presents a session cookie."""
+
+    def _get_key(self, request):
+        """Let later explicit auth schemes run when no session is present."""
+
+        if self.param_name not in request.COOKIES:
+            return None
+        return super()._get_key(request)
+
+
+session_or_access_token = [OptionalSessionAuth(), access_token_bearer]
 
 
 def require_access(*, request, scope, dataset_id=None):

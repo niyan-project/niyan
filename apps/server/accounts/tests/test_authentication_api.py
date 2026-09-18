@@ -213,9 +213,10 @@ class AccessTokenApiTests(TestCase):
         dataset = self.create_dataset()
         raw_token = self.issue_token(scopes=['api']).json()['token']
         self.client.logout()
+        api_client = Client(enforce_csrf_checks=True)
 
-        read_response = self.client.get(f'/api/v1/datasets/{dataset.id}', HTTP_AUTHORIZATION=f'Bearer {raw_token}')
-        update_response = self.client.patch(
+        read_response = api_client.get(f'/api/v1/datasets/{dataset.id}', HTTP_AUTHORIZATION=f'Bearer {raw_token}')
+        update_response = api_client.patch(
             f'/api/v1/datasets/{dataset.id}',
             {'name': 'Updated'},
             content_type='application/json',
@@ -223,7 +224,7 @@ class AccessTokenApiTests(TestCase):
         )
 
         self.assertEqual(read_response.status_code, 200)
-        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.status_code, 200, update_response.content)
         self.assertEqual(update_response.json()['name'], 'Updated')
 
 
