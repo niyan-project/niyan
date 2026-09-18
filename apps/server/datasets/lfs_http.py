@@ -2,12 +2,14 @@ import json
 import re
 
 from django.conf import settings
+from django.core import signing
 from django.db import IntegrityError
 from django.http import JsonResponse
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 
 from accounts.authentication import access_token_permits, authenticate_git_basic
+from accounts.models import AccessToken
 from datasets.lfs_transfers import LfsIntegrityError, LfsObjectMissing, LfsTransferUnavailable, finalize_lfs_upload, issue_download_action, issue_upload_action
 from datasets.models import Dataset, LfsObject
 from datasets.object_storage import ObjectStoreError
@@ -21,6 +23,7 @@ MAX_LFS_OBJECT_SIZE = 2**63 - 1
 MAX_S3_OBJECT_SIZE = 5 * 1024**4
 MULTIPART_TRANSFER = 'niyan-multipart'
 OID_PATTERN = re.compile(r'^[0-9a-f]{64}$')
+LFS_VERIFY_AUTHORIZATION_SALT = 'niyan.lfs.verify.v1'
 
 
 class InvalidLfsBatch(ValueError):
@@ -88,6 +91,7 @@ def lfs_batch(request, dataset_id):
     objects = [
         _negotiate_object(
             dataset=dataset,
+            access_token=access_token,
             operation=operation,
             requested=requested,
             transfer=transfer,
@@ -107,7 +111,7 @@ def lfs_verify(request, dataset_id, oid):
         response = _lfs_response({'message': 'Only POST is supported.'}, status=405)
         response['Allow'] = 'POST'
         return response
-    access_token = authenticate_git_basic(request)
+    access_token, verification_claims = _authenticate_verify_request(request=request, dataset_id=dataset_id, oid=oid)
     if access_token is None:
         response = _lfs_response({'message': 'Authentication is required.'}, status=401)
         response['WWW-Authenticate'] = 'Basic realm="Niyan Git LFS"'
@@ -121,6 +125,8 @@ def lfs_verify(request, dataset_id, oid):
         requested = _parse_verify_request(request, route_oid=oid)
     except InvalidLfsBatch as error:
         return _lfs_response({'message': str(error)}, status=error.status)
+    if verification_claims is not None and verification_claims['size'] != requested['size']:
+        return _lfs_response({'message': 'The verification object size is invalid.'}, status=422)
     lfs_object = LfsObject.objects.select_related('dataset').filter(dataset=dataset, oid=oid).first()
     if lfs_object is None:
         return _lfs_response({'message': 'The Git LFS object is unavailable.'}, status=404)
@@ -240,18 +246,18 @@ def _parse_verify_request(request, *, route_oid):
     return {'size': size}
 
 
-def _negotiate_object(*, dataset, operation, requested, transfer, verify_url, multipart_url):
+def _negotiate_object(*, dataset, access_token, operation, requested, transfer, verify_url, multipart_url):
     """Negotiate one object without exposing storage or policy internals."""
 
     oid = requested['oid']
     size = requested['size']
     response = {'oid': oid, 'size': size, 'authenticated': True}
     if operation == 'upload':
-        return _negotiate_upload(dataset=dataset, oid=oid, size=size, response=response, transfer=transfer, verify_url=verify_url, multipart_url=multipart_url)
+        return _negotiate_upload(dataset=dataset, access_token=access_token, oid=oid, size=size, response=response, transfer=transfer, verify_url=verify_url, multipart_url=multipart_url)
     return _negotiate_download(dataset=dataset, oid=oid, size=size, response=response)
 
 
-def _negotiate_upload(*, dataset, oid, size, response, transfer, verify_url, multipart_url):
+def _negotiate_upload(*, dataset, access_token, oid, size, response, transfer, verify_url, multipart_url):
     """Reuse verified content or authorize one bounded basic upload."""
 
     try:
@@ -264,17 +270,60 @@ def _negotiate_upload(*, dataset, oid, size, response, transfer, verify_url, mul
         return response
     if size > MAX_S3_OBJECT_SIZE:
         return _object_error(response, 422, 'This object exceeds the supported S3 object size.')
+    verify_action = _issue_verify_action(access_token=access_token, dataset=dataset, oid=oid, size=size, verify_url=verify_url)
     if size >= settings.NIYAN_LFS_MULTIPART_THRESHOLD_BYTES:
         if transfer != MULTIPART_TRANSFER:
             return _object_error(response, 422, 'This object requires the Niyān multipart transfer agent.')
-        response['actions'] = {'upload': {'href': multipart_url}, 'verify': {'href': verify_url}}
+        response['actions'] = {'upload': {'href': multipart_url}, 'verify': verify_action}
         return response
     try:
         action = issue_upload_action(lfs_object=lfs_object)
     except (LfsTransferUnavailable, ObjectStoreError):
         return _object_error(response, 503, 'The upload action is temporarily unavailable.')
-    response['actions'] = {'upload': _serialize_action(action), 'verify': {'href': verify_url}}
+    response['actions'] = {'upload': _serialize_action(action), 'verify': verify_action}
     return response
+
+
+def _issue_verify_action(*, access_token, dataset, oid, size, verify_url):
+    """Issue a short-lived capability for Git LFS's separate verify request."""
+
+    capability = signing.dumps(
+        {'token_id': str(access_token.id), 'dataset_id': str(dataset.id), 'oid': oid, 'size': size},
+        salt=LFS_VERIFY_AUTHORIZATION_SALT,
+        compress=True,
+    )
+    return {
+        'href': verify_url,
+        'expires_in': settings.NIYAN_LFS_TRANSFER_ACTION_LIFETIME_SECONDS,
+        'header': {'Authorization': f'Bearer {capability}'},
+    }
+
+
+def _authenticate_verify_request(*, request, dataset_id, oid):
+    """Authenticate Basic credentials or one exact short-lived verify capability."""
+
+    access_token = authenticate_git_basic(request)
+    if access_token is not None:
+        return access_token, None
+
+    authorization = request.headers.get('Authorization', '')
+    scheme, separator, capability = authorization.partition(' ')
+    if not separator or scheme.lower() != 'bearer' or not capability:
+        return None, None
+    try:
+        claims = signing.loads(
+            capability,
+            salt=LFS_VERIFY_AUTHORIZATION_SALT,
+            max_age=settings.NIYAN_LFS_TRANSFER_ACTION_LIFETIME_SECONDS,
+        )
+    except signing.BadSignature:
+        return None, None
+    if not isinstance(claims, dict) or claims.get('dataset_id') != str(dataset_id) or claims.get('oid') != oid or isinstance(claims.get('size'), bool) or not isinstance(claims.get('size'), int):
+        return None, None
+    access_token = AccessToken.objects.select_related('user', 'dataset').filter(pk=claims.get('token_id')).first()
+    if access_token is None or not access_token.user.is_active or not access_token.is_active():
+        return None, None
+    return access_token, claims
 
 
 def _negotiate_download(*, dataset, oid, size, response):

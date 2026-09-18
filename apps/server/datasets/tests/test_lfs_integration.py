@@ -171,6 +171,7 @@ class LfsDataPlaneIntegrationTests(TestCase):
 
         upload_response = self.post_batch('upload', [requested])
         upload_action = upload_response.json()['objects'][0]['actions']['upload']
+        verify_action = upload_response.json()['objects'][0]['actions']['verify']
         self.assertEqual(upload_response.status_code, 200)
         self.assertNotEqual(urlsplit(upload_action['href']).netloc, 'testserver')
 
@@ -182,7 +183,7 @@ class LfsDataPlaneIntegrationTests(TestCase):
             f'/git/{self.dataset.id}.git/info/lfs/objects/{oid}/verify',
             data=requested,
             content_type='application/vnd.git-lfs+json',
-            HTTP_AUTHORIZATION=self._basic(self.write_token),
+            HTTP_AUTHORIZATION=verify_action['header']['Authorization'],
         )
         download_response = self.post_batch('download', [requested], token=self.read_token)
         download_action = download_response.json()['objects'][0]['actions']['download']
@@ -257,12 +258,13 @@ class LfsDataPlaneIntegrationTests(TestCase):
         content = b'authorization changes'
         requested = {'oid': hashlib.sha256(content).hexdigest(), 'size': len(content)}
         negotiated = self.post_batch('upload', [requested], token=collaborator_token)
+        verify_authorization = negotiated.json()['objects'][0]['actions']['verify']['header']['Authorization']
         grant.delete()
         denied_verify = self.client.post(
             f'/git/{self.dataset.id}.git/info/lfs/objects/{requested["oid"]}/verify',
             data=requested,
             content_type='application/vnd.git-lfs+json',
-            HTTP_AUTHORIZATION=self._basic(collaborator_token, username='collaborator'),
+            HTTP_AUTHORIZATION=verify_authorization,
         )
 
         self.assertEqual(allowed.status_code, 200)

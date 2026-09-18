@@ -20,11 +20,13 @@ The server supports the Git LFS Batch API at:
 POST /git/<dataset-uuid>.git/info/lfs/objects/batch
 ```
 
-Git LFS requests use HTTPS Basic authentication as defined by the [authentication specification](authentication.md): the username is informational and the access token is the password. Downloads require `read_repository`; upload negotiation and finalization require `write_repository`. The server must also apply the token's resource boundary and the user's current dataset authorization.
+Git LFS batch requests use HTTPS Basic authentication as defined by the [authentication specification](authentication.md): the username is informational and the access token is the password. Downloads require `read_repository`; upload negotiation and finalization require `write_repository`. The server must also apply the token's resource boundary and the user's current dataset authorization.
+
+Git LFS executes an upload's standard `verify` action separately and does not automatically reuse the batch request's repository credential for that action. Niyān therefore returns a short-lived signed Bearer capability in the verify action's `header` map. The capability is scoped to the issuing access-token record, dataset UUID, object identifier, and declared size. Verification must reject an expired or altered capability and must recheck that the underlying access token, account, resource boundary, scope, and current dataset role still permit the operation. The Batch response must never echo the long-lived access-token secret.
 
 The server accepts `upload` and `download` batch operations. It must reject unsupported operations, malformed object identifiers, negative or inconsistent sizes, unsupported hash algorithms, and requests containing more than 100 objects. A client may transfer more than 100 objects through successive batches. An oversized request receives `413 Payload Too Large`; object-specific failures use the standard per-object Git LFS error shape when possible.
 
-Batch requests and responses must use `application/vnd.git-lfs+json`. Responses must not expose bucket names, internal keys, provider credentials, backend errors, or authorization details.
+Batch requests and responses must use `application/vnd.git-lfs+json`. Responses must not expose bucket names, internal keys, provider credentials, backend errors, long-lived access tokens, or authorization details beyond short-lived action-scoped capabilities required by the standard protocol.
 
 ## Object Identity and Isolation
 

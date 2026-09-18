@@ -20,7 +20,7 @@ class LfsBatchApiTests(TestCase):
         self.user = User.objects.create_user(username='researcher')
         self.dataset = Dataset.objects.create(namespace=self.user.personal_namespace, slug='images', name='Images', created_by=self.user)
         _, self.read_token = create_access_token(user=self.user, name='Reader', scopes=['read_repository'], origin=AccessToken.Origin.CLI)
-        _, self.write_token = create_access_token(user=self.user, name='Writer', scopes=['write_repository'], origin=AccessToken.Origin.CLI)
+        self.write_access_token, self.write_token = create_access_token(user=self.user, name='Writer', scopes=['write_repository'], origin=AccessToken.Origin.CLI)
         self.client = Client()
         self.url = f'/git/{self.dataset.id}.git/info/lfs/objects/batch'
 
@@ -56,8 +56,10 @@ class LfsBatchApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/vnd.git-lfs+json')
+        response_body = response.json()
+        verify_action = response_body['objects'][0]['actions'].pop('verify')
         self.assertEqual(
-            response.json(),
+            response_body,
             {
                 'transfer': 'basic',
                 'hash_algo': 'sha256',
@@ -68,12 +70,15 @@ class LfsBatchApiTests(TestCase):
                         'authenticated': True,
                         'actions': {
                             'upload': {'href': 'https://storage.example.test/signed', 'expires_in': 300, 'header': {'Content-Length': '12'}},
-                            'verify': {'href': f'http://testserver/git/{self.dataset.id}.git/info/lfs/objects/{oid}/verify'},
                         },
                     }
                 ],
             },
         )
+        self.assertEqual(verify_action['href'], f'http://testserver/git/{self.dataset.id}.git/info/lfs/objects/{oid}/verify')
+        self.assertEqual(verify_action['expires_in'], 300)
+        self.assertTrue(verify_action['header']['Authorization'].startswith('Bearer '))
+        self.assertNotIn(self.write_token, verify_action['header']['Authorization'])
         lfs_object = LfsObject.objects.get(dataset=self.dataset, oid=oid)
         self.assertEqual(lfs_object.state, LfsObject.State.PENDING)
         issue_action.assert_called_once_with(lfs_object=lfs_object)
@@ -135,21 +140,48 @@ class LfsBatchApiTests(TestCase):
         self.assertIn('multipart', response.json()['objects'][0]['error']['message'])
 
     def test_verify_endpoint_finalizes_matching_pending_object(self):
-        """Authenticate the standard verify action and expose no storage metadata."""
+        """Use the negotiated scoped capability for the standard verify action."""
 
         lfs_object = LfsObject.objects.create(dataset=self.dataset, oid='f' * 64, size=12)
+        negotiated = self.post_batch({'operation': 'upload', 'objects': [{'oid': lfs_object.oid, 'size': lfs_object.size}]})
+        authorization = negotiated.json()['objects'][0]['actions']['verify']['header']['Authorization']
         lfs_object.state = LfsObject.State.AVAILABLE
         with patch('datasets.lfs_http.finalize_lfs_upload', return_value=lfs_object) as finalize:
             response = self.client.post(
                 f'/git/{self.dataset.id}.git/info/lfs/objects/{lfs_object.oid}/verify',
                 data={'oid': lfs_object.oid, 'size': lfs_object.size},
                 content_type='application/vnd.git-lfs+json',
-                HTTP_AUTHORIZATION=f'Basic {base64.b64encode(f"researcher:{self.write_token}".encode()).decode()}',
+                HTTP_AUTHORIZATION=authorization,
             )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'oid': lfs_object.oid, 'size': lfs_object.size})
         finalize.assert_called_once()
+
+    def test_verify_capability_is_exact_and_rechecks_live_token_state(self):
+        """Reject replay for another object and revoke authority immediately."""
+
+        first = LfsObject.objects.create(dataset=self.dataset, oid='4' * 64, size=12)
+        second = LfsObject.objects.create(dataset=self.dataset, oid='5' * 64, size=12)
+        negotiated = self.post_batch({'operation': 'upload', 'objects': [{'oid': first.oid, 'size': first.size}]})
+        authorization = negotiated.json()['objects'][0]['actions']['verify']['header']['Authorization']
+
+        wrong_object = self.client.post(
+            f'/git/{self.dataset.id}.git/info/lfs/objects/{second.oid}/verify',
+            data={'oid': second.oid, 'size': second.size},
+            content_type='application/vnd.git-lfs+json',
+            HTTP_AUTHORIZATION=authorization,
+        )
+        AccessToken.objects.filter(pk=self.write_access_token.pk).update(revoked_at=timezone.now())
+        revoked = self.client.post(
+            f'/git/{self.dataset.id}.git/info/lfs/objects/{first.oid}/verify',
+            data={'oid': first.oid, 'size': first.size},
+            content_type='application/vnd.git-lfs+json',
+            HTTP_AUTHORIZATION=authorization,
+        )
+
+        self.assertEqual(wrong_object.status_code, 401)
+        self.assertEqual(revoked.status_code, 401)
 
     def test_verify_endpoint_maps_missing_and_integrity_failures(self):
         """Return stable protocol failures without exposing provider details."""
