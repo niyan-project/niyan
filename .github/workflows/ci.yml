@@ -48,8 +48,8 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: apps/server/uv.lock
-      - name: Install Git LFS
-        run: git lfs install
+      - name: Verify Git LFS
+        run: git lfs version
       - name: Install server dependencies
         working-directory: apps/server
         run: uv sync --frozen

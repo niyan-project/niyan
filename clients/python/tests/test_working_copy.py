@@ -25,6 +25,9 @@ class WorkingCopyTests(unittest.TestCase):
     def setUp(self):
         """Create an isolated, configured Niyān dataset checkout."""
 
+        self.global_config = patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull})
+        self.global_config.start()
+        self.addCleanup(self.global_config.stop)
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
         self.repository = self.root / 'dataset'
