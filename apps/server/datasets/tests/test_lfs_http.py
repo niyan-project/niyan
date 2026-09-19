@@ -143,7 +143,11 @@ class LfsBatchApiTests(TestCase):
         """Use the negotiated scoped capability for the standard verify action."""
 
         lfs_object = LfsObject.objects.create(dataset=self.dataset, oid='f' * 64, size=12)
-        negotiated = self.post_batch({'operation': 'upload', 'objects': [{'oid': lfs_object.oid, 'size': lfs_object.size}]})
+        with patch(
+            'datasets.lfs_http.issue_upload_action',
+            return_value=PresignedAction(method='PUT', url='https://storage.example.test/signed'),
+        ):
+            negotiated = self.post_batch({'operation': 'upload', 'objects': [{'oid': lfs_object.oid, 'size': lfs_object.size}]})
         authorization = negotiated.json()['objects'][0]['actions']['verify']['header']['Authorization']
         lfs_object.state = LfsObject.State.AVAILABLE
         with patch('datasets.lfs_http.finalize_lfs_upload', return_value=lfs_object) as finalize:
@@ -163,7 +167,11 @@ class LfsBatchApiTests(TestCase):
 
         first = LfsObject.objects.create(dataset=self.dataset, oid='4' * 64, size=12)
         second = LfsObject.objects.create(dataset=self.dataset, oid='5' * 64, size=12)
-        negotiated = self.post_batch({'operation': 'upload', 'objects': [{'oid': first.oid, 'size': first.size}]})
+        with patch(
+            'datasets.lfs_http.issue_upload_action',
+            return_value=PresignedAction(method='PUT', url='https://storage.example.test/signed'),
+        ):
+            negotiated = self.post_batch({'operation': 'upload', 'objects': [{'oid': first.oid, 'size': first.size}]})
         authorization = negotiated.json()['objects'][0]['actions']['verify']['header']['Authorization']
 
         wrong_object = self.client.post(
