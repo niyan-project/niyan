@@ -19,6 +19,8 @@ The repository is a modular monorepo. Setup and verification commands are mainta
 
 Keep changes cohesive and avoid unrelated cleanup. Add the smallest test that demonstrates the behavior or would have caught the bug. Do not add generated secrets, credentials, local databases, caches, or build output.
 
+The [coverage policy](docs/coverage.md) defines the component baselines, risk priorities, exclusions, and CI ratchet. Coverage improvements must come from meaningful behavioral assertions rather than superficial execution or a reduced test scope.
+
 Commit messages use [Conventional Commits](https://www.conventionalcommits.org/). Pull requests should explain the problem, the chosen behavior, verification performed, and any operational or compatibility impact. A maintainer may ask that a large pull request be split into independently reviewable changes.
 
 ## Review and acceptance
