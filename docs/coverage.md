@@ -33,4 +33,6 @@ Coverage must never be increased by deleting scenarios, weakening assertions, re
 
 The `server` and `python-client` flags are uploaded independently on every applicable CI run. Missing or failed uploads fail CI. Their project and patch checks are blocking.
 
+Pull requests must pass `codecov/project/server`, `codecov/project/python-client`, `codecov/patch/server`, and `codecov/patch/python-client` in addition to the component test jobs.
+
 When a legitimate behavior change lowers coverage, the preferred response is to add the missing test in the same change. A temporary exception must identify an owner, explain the concrete blocker, and state when the exception will be removed.
