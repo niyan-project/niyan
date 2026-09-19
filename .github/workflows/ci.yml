@@ -15,7 +15,7 @@ concurrency:
 jobs:
   server:
     name: Django, Git, Git LFS, and end-to-end
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17-alpine
@@ -71,7 +71,7 @@ jobs:
 
   python-client:
     name: Python client (${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -96,7 +96,7 @@ jobs:
 
   web:
     name: Nuxt checks and build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -122,7 +122,7 @@ jobs:
 
   container:
     name: Production image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [server, python-client, web]
     steps:
       - uses: actions/checkout@v7
