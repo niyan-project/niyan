@@ -74,7 +74,7 @@ jobs:
       - name: Generate server coverage reports
         working-directory: apps/server
         run: |
-          .venv/bin/coverage report
+          .venv/bin/coverage report --fail-under=85
           .venv/bin/coverage xml
           .venv/bin/coverage html
       - name: Publish server coverage to Codecov
@@ -125,7 +125,7 @@ jobs:
       - name: Generate client coverage reports
         working-directory: clients/python
         run: |
-          .venv/bin/coverage report
+          .venv/bin/coverage report --fail-under=80
           .venv/bin/coverage xml
           .venv/bin/coverage html
       - name: Publish client coverage to Codecov
