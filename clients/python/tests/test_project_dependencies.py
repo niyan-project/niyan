@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from niyan.cli import build_parser
 from niyan.errors import GitError
-from niyan.project_dependencies import _identity_from_url, _list_dependencies, add_dataset_dependency, remove_dataset_dependency, update_dataset_dependencies
+from niyan.project_dependencies import _canonical_git_url, _checkout_exact_commit, _classify_moving_ref, _dependency_path, _ensure_dependency_checkout, _git, _identity_from_url, _indexed_gitlink, _list_dependencies, _submodule_state, _unavailable_lfs_count, add_dataset_dependency, remove_dataset_dependency, show_dataset_dependencies, update_dataset_dependencies
 
 
 DATASET_ID = '22222222-2222-2222-2222-222222222222'
@@ -100,6 +100,25 @@ class ProjectDependencyTests(unittest.TestCase):
         status = self._git_text(self.project, 'status', '--porcelain')
         self.assertIn('D  datasets/images', status)
 
+    def test_add_rejects_existing_destination_and_cleans_failed_clone(self):
+        """Protect existing paths and remove a new checkout when pinning fails."""
+
+        existing = self.project / 'existing'
+        existing.mkdir()
+        with self.assertRaisesRegex(GitError, 'already exists'):
+            add_dataset_dependency(host=HOST, dataset_path='lab/images', destination='existing', paths=object(), stores=object(), cwd=self.project, api_factory=FakeDependencyApi)
+
+        def clone_function(**arguments):
+            """Create the checkout directory as the real clone operation would."""
+
+            checkout = Path(arguments['cwd']) / arguments['destination']
+            checkout.mkdir(parents=True)
+
+        with patch('niyan.project_dependencies.select_credential', return_value=SimpleNamespace(token='secret')), patch('niyan.project_dependencies._checkout_exact_commit', side_effect=GitError('pin failed')):
+            with self.assertRaisesRegex(GitError, 'pin failed'):
+                add_dataset_dependency(host=HOST, dataset_path='lab/images', destination='failed', paths=object(), stores=object(), cwd=self.project, api_factory=FakeDependencyApi, clone_function=clone_function)
+        self.assertFalse((self.project / 'failed').exists())
+
     def test_update_uses_configured_branch_and_stages_exact_commit(self):
         """A dependency without an explicit revision follows its standard branch field."""
 
@@ -112,12 +131,132 @@ class ProjectDependencyTests(unittest.TestCase):
         self.assertEqual(updated[0]['moving_ref'], 'main')
         self.assertIn(FakeDependencyApi.commit, output.getvalue())
 
+    def test_update_skips_immutable_dependencies_and_rejects_unknown_path(self):
+        """Leave tag-pinned dependencies alone and diagnose misspelled paths."""
+
+        self._add(revision='v1')
+
+        self.assertEqual(update_dataset_dependencies(paths=object(), stores=object(), cwd=self.project, api_factory=FakeDependencyApi), [])
+        with self.assertRaisesRegex(GitError, 'not a dataset dependency'):
+            update_dataset_dependencies(dependency_path='datasets/missing', paths=object(), stores=object(), cwd=self.project, api_factory=FakeDependencyApi)
+
+    def test_status_reports_standard_submodule_identity_and_state(self):
+        """Show the parent pin, moving branch, checkout state, and LFS count."""
+
+        self._add()
+        output = io.StringIO()
+        identity = SimpleNamespace(dataset_path='lab/images')
+        with patch('niyan.project_dependencies.load_checkout_identity', side_effect=(None, identity)), patch('niyan.project_dependencies._submodule_state', return_value='clean'), patch('niyan.project_dependencies._unavailable_lfs_count', return_value=2):
+            rows = show_dataset_dependencies(cwd=self.project, stdout=output)
+
+        self.assertEqual(rows[0]['dataset_path'], 'lab/images')
+        self.assertEqual(rows[0]['pinned_commit'], FakeDependencyApi.commit)
+        self.assertEqual(rows[0]['moving_ref'], 'main')
+        self.assertEqual(rows[0]['lfs_unavailable'], 2)
+        self.assertIn('datasets/images\tlab/images', output.getvalue())
+
     def test_dependency_identity_requires_canonical_credential_free_url(self):
         """Only the documented dataset repository URL shape is accepted."""
 
         self.assertEqual(_identity_from_url(GIT_URL), (HOST, DATASET_ID))
         with self.assertRaises(GitError):
             _identity_from_url(f'https://token@example.test/git/{DATASET_ID}.git')
+
+    def test_dependency_path_and_repository_url_validation(self):
+        """Reject traversal, invalid identities, and unsafe repository metadata."""
+
+        self.assertEqual(_dependency_path('datasets/images'), 'datasets/images')
+        for value in ('', '.', '..', '../images', '/datasets/images', 'datasets/../images'):
+            with self.subTest(path=value):
+                with self.assertRaises(GitError):
+                    _dependency_path(value)
+
+        self.assertEqual(_canonical_git_url(host=HOST, dataset_id=DATASET_ID, value=GIT_URL), GIT_URL)
+        invalid = [
+            (DATASET_ID, None),
+            ('not-a-uuid', GIT_URL),
+            (DATASET_ID, f'https://token@niyan.example/git/{DATASET_ID}.git'),
+            (DATASET_ID, f'https://other.example/git/{DATASET_ID}.git'),
+            (DATASET_ID, f'{GIT_URL}?token=secret'),
+        ]
+        for dataset_id, value in invalid:
+            with self.subTest(dataset_id=dataset_id, value=value):
+                with self.assertRaises(GitError):
+                    _canonical_git_url(host=HOST, dataset_id=dataset_id, value=value)
+
+        with self.assertRaisesRegex(GitError, 'invalid Niyān dataset identity'):
+            _identity_from_url(f'{HOST}/git/{"0" * 36}.git')
+
+    def test_moving_ref_classification_handles_pagination_and_ambiguity(self):
+        """Follow paginated refs and refuse a name shared by branch and tag."""
+
+        class PaginatedApi:
+            """Return a branch on the second page and no matching tag."""
+
+            def list_repository_refs(self, dataset_id, *, kind, limit, offset):
+                """Return deterministic paginated ref data."""
+
+                if kind == 'branches' and offset == 0:
+                    return 200, {'items': [], 'next_offset': 100}
+                names = ['experiment'] if kind == 'branches' else ['v1']
+                return 200, {'items': [{'name': name} for name in names], 'next_offset': None}
+
+        self.assertEqual(_classify_moving_ref(api=PaginatedApi(), dataset_id=DATASET_ID, revision='experiment'), 'experiment')
+        self.assertIsNone(_classify_moving_ref(api=PaginatedApi(), dataset_id=DATASET_ID, revision='missing'))
+
+        api = FakeDependencyApi(HOST)
+        original = api.list_repository_refs
+        api.list_repository_refs = lambda dataset_id, kind, limit, offset: (200, {'items': [{'name': 'shared'}], 'next_offset': None})
+        with self.assertRaisesRegex(GitError, 'ambiguous'):
+            _classify_moving_ref(api=api, dataset_id=DATASET_ID, revision='shared')
+        api.list_repository_refs = original
+
+    def test_checkout_and_initialization_failures_are_translated(self):
+        """Reject unsuccessful authenticated fetch, checkout, and submodule init."""
+
+        credential = SimpleNamespace(token='secret')
+        context = unittest.mock.MagicMock()
+        context.__enter__.return_value = ['git']
+        with patch('niyan.project_dependencies._authenticated_git', return_value=context), patch('niyan.project_dependencies._git_environment', return_value={}), patch('niyan.project_dependencies._run_git', return_value=SimpleNamespace(returncode=1)):
+            with self.assertRaisesRegex(GitError, 'fetch the pinned'):
+                _checkout_exact_commit(checkout=self.project, host=HOST, credential=credential, commit=FakeDependencyApi.commit, environment={})
+
+        with patch('niyan.project_dependencies._authenticated_git', return_value=context), patch('niyan.project_dependencies._git_environment', return_value={}), patch('niyan.project_dependencies._run_git', side_effect=(SimpleNamespace(returncode=0), SimpleNamespace(returncode=1))):
+            with self.assertRaisesRegex(GitError, 'check out the pinned'):
+                _checkout_exact_commit(checkout=self.project, host=HOST, credential=credential, commit=FakeDependencyApi.commit, environment={})
+
+        checkout = self.project / 'uninitialized'
+        with patch('niyan.project_dependencies._authenticated_git', return_value=context), patch('niyan.project_dependencies._git_environment', return_value={}), patch('niyan.project_dependencies._run_git', return_value=SimpleNamespace(returncode=1)):
+            with self.assertRaisesRegex(GitError, 'initialize the dataset'):
+                _ensure_dependency_checkout(project=self.project, checkout=checkout, dependency_path='uninitialized', host=HOST, credential=credential, environment={})
+
+    def test_dependency_state_helpers_reject_invalid_git_data(self):
+        """Map Git markers precisely and fail closed around malformed gitlinks."""
+
+        with patch('niyan.project_dependencies._git_text', return_value='100644 invalid 0\tdata'):
+            with self.assertRaisesRegex(GitError, 'not recorded as a Git submodule'):
+                _indexed_gitlink(self.project, 'data')
+
+        for marker, expected in (('', 'uninitialized'), ('-abc data', 'uninitialized'), ('+abc data', 'out-of-sync'), ('Uabc data', 'conflict'), (' abc data', 'clean')):
+            with self.subTest(marker=marker):
+                with patch('niyan.project_dependencies._git', return_value=SimpleNamespace(stdout=marker.encode())):
+                    self.assertEqual(_submodule_state(self.project, 'data'), expected)
+
+        with patch('niyan.project_dependencies._git_text', side_effect=GitError('unavailable')):
+            self.assertEqual(_unavailable_lfs_count(self.project), '-')
+
+    def test_git_runner_reports_missing_process_and_nonzero_exit(self):
+        """Translate dependency, process, and command failures consistently."""
+
+        with patch('niyan.project_dependencies.shutil.which', return_value=None):
+            with self.assertRaisesRegex(GitError, 'Git is required'):
+                _git(self.project, ['status'], operation='inspect the project')
+        with patch('niyan.project_dependencies.shutil.which', return_value='/usr/bin/git'), patch('niyan.project_dependencies.subprocess.run', side_effect=OSError('process failed')):
+            with self.assertRaisesRegex(GitError, 'could not inspect'):
+                _git(self.project, ['status'], operation='inspect the project')
+        with patch('niyan.project_dependencies.shutil.which', return_value='/usr/bin/git'), patch('niyan.project_dependencies.subprocess.run', return_value=SimpleNamespace(returncode=2)):
+            with self.assertRaisesRegex(GitError, 'could not inspect'):
+                _git(self.project, ['status'], operation='inspect the project')
 
     def test_cli_exposes_the_documented_dependency_commands(self):
         """The public grammar matches the project-dependency specification."""
