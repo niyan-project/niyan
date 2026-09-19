@@ -1,0 +1,40 @@
+name: Bug report
+description: Report reproducible incorrect behavior in Niyān.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, signed URLs, private data, or security vulnerabilities. Follow SECURITY.md for private reports.
+  - type: input
+    id: version
+    attributes:
+      label: Niyān version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Deployment method, operating system, Python, Git, and Git LFS versions as applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest safe sequence that demonstrates the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
