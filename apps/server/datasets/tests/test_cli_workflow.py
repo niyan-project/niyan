@@ -24,6 +24,7 @@ from niyan.config import AppPaths, Configuration, CredentialBinding
 from niyan.credentials import CredentialStores
 from niyan.datasets import create_remote_dataset, view_remote_dataset
 from niyan.errors import ApiError, GitConflictError, GitError
+from niyan.filesystem import NiyanFileSystem
 from niyan.git import clone_dataset, pull_dataset, push_dataset
 from niyan.working_copy import commit_changes, stage_paths
 
@@ -128,6 +129,12 @@ class CliAlphaWorkflowTests(LiveServerTestCase):
         self.assertIn('# Research images', browse_output.getvalue())
         self.assertEqual((consumer / 'images.bin').read_bytes(), large_content)
         self.assertEqual(self._git('-C', str(consumer), 'rev-parse', '--is-shallow-repository').stdout.strip(), 'true')
+
+        filesystem = NiyanFileSystem(host=self.live_server_url, dataset='researcher/images', token=self.raw_token, block_size=32)
+        with filesystem.open('images.bin', 'rb') as remote_file:
+            self.assertEqual(remote_file.read(22), large_content[:22])
+            remote_file.seek(10 * MIB)
+            self.assertEqual(remote_file.read(), large_content[10 * MIB :])
 
         (source / 'labels.csv').write_text('sample,label\n1,cat\n2,dog\n')
         stage_paths(['labels.csv'], cwd=source)

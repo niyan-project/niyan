@@ -46,10 +46,32 @@ class DirectObjectHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         self.server.get_paths.append(path)
-        self.send_response(200)
-        self.send_header('Content-Length', str(len(content)))
+        start, end = 0, len(content)
+        range_header = self.headers.get('Range')
+        if range_header is not None:
+            if not range_header.startswith('bytes=') or ',' in range_header:
+                self.send_error(416)
+                return
+            start_text, separator, end_text = range_header[6:].partition('-')
+            if not separator or not start_text or not end_text:
+                self.send_error(416)
+                return
+            try:
+                start, inclusive_end = int(start_text), int(end_text)
+            except ValueError:
+                self.send_error(416)
+                return
+            end = min(len(content), inclusive_end + 1)
+            if start < 0 or start >= end:
+                self.send_error(416)
+                return
+        self.send_response(206 if range_header is not None else 200)
+        self.send_header('Content-Length', str(end - start))
+        self.send_header('Accept-Ranges', 'bytes')
+        if range_header is not None:
+            self.send_header('Content-Range', f'bytes {start}-{end - 1}/{len(content)}')
         self.end_headers()
-        self.wfile.write(content)
+        self.wfile.write(content[start:end])
 
     def log_message(self, format, *args):
         """Keep deterministic tests from writing request diagnostics."""

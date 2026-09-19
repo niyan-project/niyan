@@ -1,0 +1,147 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Django, Git, Git LFS, and end-to-end
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: niyan
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d niyan"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      NIYAN_SECRET_KEY: ci-only-secret-key
+      NIYAN_DEBUG: "true"
+      NIYAN_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+      NIYAN_DATABASE_URL: postgresql://niyan:niyan@127.0.0.1:5432/niyan
+      NIYAN_TEST_DATABASE_NAME: niyan_test
+      NIYAN_GIT_ROOT: ${{ runner.temp }}/niyan-git
+      NIYAN_S3_BUCKET: ci-only
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/server/uv.lock
+      - name: Install Git LFS
+        run: git lfs install
+      - name: Install server dependencies
+        working-directory: apps/server
+        run: uv sync --frozen
+      - name: Create least-privilege application databases
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE niyan LOGIN PASSWORD 'niyan' NOSUPERUSER NOCREATEDB NOCREATEROLE;"
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE niyan_test;"
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE niyan TO niyan;"
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE niyan_test TO niyan;"
+          psql -h 127.0.0.1 -U postgres -d niyan -v ON_ERROR_STOP=1 -c "GRANT USAGE, CREATE ON SCHEMA public TO niyan;"
+          psql -h 127.0.0.1 -U postgres -d niyan_test -v ON_ERROR_STOP=1 -c "GRANT USAGE, CREATE ON SCHEMA public TO niyan;"
+          mkdir -p "$NIYAN_GIT_ROOT"
+      - name: Check migrations
+        working-directory: apps/server
+        run: .venv/bin/python manage.py makemigrations --check --dry-run
+      - name: Run server and cross-component tests
+        working-directory: apps/server
+        run: .venv/bin/python manage.py test --keepdb
+
+  python-client:
+    name: Python client (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: clients/python/uv.lock
+      - name: Install dependencies
+        working-directory: clients/python
+        run: uv sync --frozen
+      - name: Run client tests
+        working-directory: clients/python
+        run: .venv/bin/python -m unittest discover -s tests
+
+  web:
+    name: Nuxt checks and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: apps/web
+        run: pnpm install --frozen-lockfile
+      - name: Check types
+        working-directory: apps/web
+        run: pnpm typecheck
+      - name: Run component tests
+        working-directory: apps/web
+        run: pnpm test
+      - name: Build static application
+        working-directory: apps/web
+        run: pnpm build
+
+  container:
+    name: Production image
+    runs-on: ubuntu-latest
+    needs: [server, python-client, web]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: niyan:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Validate Compose configuration
+        run: docker compose --env-file deploy/.env.example -f deploy/compose.yml config --quiet
+      - name: Smoke-test image contents and deployment settings
+        run: |
+          docker run --rm --entrypoint sh niyan:ci -c 'test "$(id -u)" = 10001 && git --version && git lfs version && gunicorn --version && test -f /opt/niyan/web/index.html'
+          docker run --rm \
+            -e NIYAN_SECRET_KEY=ci-only-deployment-check-secret-with-more-than-fifty-characters \
+            -e NIYAN_DEBUG=false \
+            -e NIYAN_ALLOWED_HOSTS=niyan.example.org \
+            -e NIYAN_CSRF_TRUSTED_ORIGINS=https://niyan.example.org \
+            -e NIYAN_DATABASE_URL=sqlite:///:memory: \
+            -e NIYAN_S3_BUCKET=ci-only \
+            -e NIYAN_SECURE_HSTS_INCLUDE_SUBDOMAINS=true \
+            -e NIYAN_SECURE_HSTS_PRELOAD=true \
+            niyan:ci python manage.py check --deploy

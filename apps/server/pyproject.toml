@@ -12,3 +12,8 @@ dependencies = [
     "psycopg[binary]>=3.3.5",
     "whitenoise>=6.11.0",
 ]
+
+[dependency-groups]
+dev = [
+    "fsspec>=2025.3.0",
+]
