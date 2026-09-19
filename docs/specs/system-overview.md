@@ -80,7 +80,7 @@ The Nuxt application provides a Git-forge-style dataset view with namespace navi
 
 The web application is a client-rendered Nuxt 4 SPA distributed as static files under the same origin as Django. It uses Nuxt UI and Tailwind CSS, an Indigo primary color with neutral surfaces, and light, dark, and system-following appearances. The product has no public repositories, stars, followers, or other social-forge features in v1. The accepted [web application specification](web-application.md) defines its deployment, security, design, and Phase 3 workflow boundary.
 
-Manual browser upload should be possible, even though the CLI is the primary workflow. The exact staging and commit interaction is tracked by [Issue #36](https://github.com/aryan-f/Niyan/issues/36).
+Manual browser upload should be possible, even though the CLI is the primary workflow. The exact staging and commit interaction is tracked by [Issue #36](https://github.com/niyan-project/niyan/issues/36).
 
 ### CLI
 
@@ -161,9 +161,9 @@ Administrators are responsible for coordinated backups of Git repositories, Post
 
 The accepted overview does not imply that every component contract is finished. The configurable protected-ref and browser-commit decisions are now defined by their focused accepted specifications. These remaining genuinely unresolved v1 decisions have explicit tracker ownership:
 
-- [Issue #41](https://github.com/aryan-f/Niyan/issues/41) defines the viewer plugin contract, trust model, and isolation boundary.
-- [Issue #47](https://github.com/aryan-f/Niyan/issues/47) defines coordinated backup, restore, upgrade, and disaster-recovery behavior across PostgreSQL, Git repositories, and object storage.
-- [Issue #50](https://github.com/aryan-f/Niyan/issues/50) selects the open-source license and project-governance model.
-- [Issue #52](https://github.com/aryan-f/Niyan/issues/52) publishes the final v1 API, protocol, on-disk, portability, and recovery compatibility contract.
+- [Issue #41](https://github.com/niyan-project/niyan/issues/41) defines the viewer plugin contract, trust model, and isolation boundary.
+- [Issue #47](https://github.com/niyan-project/niyan/issues/47) defines coordinated backup, restore, upgrade, and disaster-recovery behavior across PostgreSQL, Git repositories, and object storage.
+- [Issue #50](https://github.com/niyan-project/niyan/issues/50) selects the open-source license and project-governance model.
+- [Issue #52](https://github.com/niyan-project/niyan/issues/52) publishes the final v1 API, protocol, on-disk, portability, and recovery compatibility contract.
 
 Full LFS reachability garbage collection after ref deletion or future history rewriting is an explicit v1 non-goal rather than an unresolved promise. Repository browsing reads Git directly for correctness in v1; any later metadata index is a rebuildable optimization and may be eventually consistent.

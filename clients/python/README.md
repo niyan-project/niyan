@@ -2,7 +2,7 @@
 
 [![Python client coverage](https://codecov.io/github/niyan-project/niyan/graph/badge.svg?flag=python-client)](https://app.codecov.io/github/niyan-project/niyan)
 [![Python 3.11–3.13](https://img.shields.io/badge/Python-3.11%E2%80%933.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](../../LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://github.com/niyan-project/niyan/blob/main/LICENSE)
 
 This package provides the `niyan` command and the importable Python client for Niyān.
 

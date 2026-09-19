@@ -29,10 +29,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aryan-f/Niyan"
-Documentation = "https://github.com/aryan-f/Niyan#readme"
-Issues = "https://github.com/aryan-f/Niyan/issues"
-Source = "https://github.com/aryan-f/Niyan"
+Homepage = "https://github.com/niyan-project/niyan"
+Documentation = "https://github.com/niyan-project/niyan#readme"
+Issues = "https://github.com/niyan-project/niyan/issues"
+Source = "https://github.com/niyan-project/niyan"
 
 [project.scripts]
 niyan = "niyan.cli:main"
