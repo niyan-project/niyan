@@ -233,10 +233,10 @@ def stage_git_file_endpoint(request, dataset_id: UUID, draft_id: UUID, path: str
         return Status(403, {'code': 'permission_denied', 'detail': 'You cannot write to this dataset.'})
     if dataset is None:
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
-    if request.content_type != 'application/octet-stream':
-        return Status(422, {'code': 'content_type_invalid', 'detail': 'Ordinary Git uploads require application/octet-stream.'})
     if size > 10 * 1024 * 1024:
         return Status(413, {'code': 'git_blob_too_large', 'detail': 'Ordinary Git uploads must not exceed 10 MiB.'})
+    if request.content_type != 'application/octet-stream':
+        return Status(422, {'code': 'content_type_invalid', 'detail': 'Ordinary Git uploads require application/octet-stream.'})
     draft = _creator_draft(request, dataset, draft_id)
     if draft is None:
         return Status(404, {'code': 'draft_not_found', 'detail': 'The browser draft does not exist.'})
