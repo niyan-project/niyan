@@ -125,7 +125,7 @@ Do not invent formatter, package-manager, migration, or test commands before the
 - Standard Git and Git LFS over HTTPS are supported user workflows. The `niyan` CLI is the highly recommended convenience interface for cloning, adding, updating, committing, and synchronizing datasets, but documentation may also show equivalent standard Git operations and their tradeoffs.
 - Prefer configuring and delegating to standard Git and Git LFS behavior over intercepting or reimplementing it. Niyān-specific defaults such as shallow history, selective materialization, automatic LFS classification, and resilient multipart uploads need not apply to users who deliberately choose stock Git behavior.
 - Client configuration never replaces server enforcement of identity, authorization, token boundaries, protected refs, or required LFS-object availability.
-- Publish the CLI as the `niyan` console entry point of the unified Python package. Support `pipx install niyan` as the standard isolated Python installation and provide a single-command bootstrap installer with checksums and a documented manual alternative.
+- Publish the CLI as the `niyan` console entry point of the unified Python package. Support `pipx install niyan` as the standard isolated Python installation. A separate bootstrap installer is deferred and must not block v1 distribution.
 - Delegate repository mechanics to Git and transfers to Git LFS wherever their documented behavior is sufficient.
 - Keep stdout suitable for requested command output and use stderr for diagnostics and progress.
 - Support non-interactive use, streaming transfers, resumable behavior where the underlying protocol allows it, and clear exit codes.

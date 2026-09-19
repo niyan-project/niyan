@@ -1,10 +1,23 @@
 import subprocess
 import sys
 import unittest
+from importlib.metadata import metadata, version
+
+import niyan
 
 
 class PackageBoundaryTests(unittest.TestCase):
     """Verify the unified distribution keeps its runtime boundaries."""
+
+    def test_distribution_metadata_matches_public_version(self):
+        """Keep the import, console package, and release version aligned."""
+
+        distribution = metadata('niyan')
+
+        self.assertEqual(version('niyan'), niyan.__version__)
+        self.assertEqual(distribution['License-Expression'], 'Apache-2.0')
+        self.assertIn('Programming Language :: Python :: 3.11', distribution.get_all('Classifier'))
+        self.assertIn('Typing :: Typed', distribution.get_all('Classifier'))
 
     def test_library_imports_do_not_initialize_cli_dependencies(self):
         """Keep ordinary and filesystem imports free of CLI side effects."""

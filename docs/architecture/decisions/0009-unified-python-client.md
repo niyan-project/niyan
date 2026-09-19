@@ -18,7 +18,7 @@ Publish one Python 3.11-or-newer distribution named `niyan`. It provides:
 - the `niyan` console entry point for CLI workflows; and
 - an importable, read-only `fsspec` filesystem implementation.
 
-The distribution is versioned and released as one product. `pipx install niyan` is the standard isolated PyPI installation for CLI users. Installing `niyan` into a Python project through pip or uv provides the library and an environment-local console entry point. The project will also provide the specified bootstrap installer and checksummed manual artifacts from the same source and version.
+The distribution is versioned and released as one product. `pipx install niyan` is the standard isolated PyPI installation for CLI users. Installing `niyan` into a Python project through pip or uv provides the library and an environment-local console entry point. A separate bootstrap installer is deferred and is not required for v1.
 
 The CLI and filesystem implementation remain separate internal modules. They may depend on narrowly scoped shared modules for HTTP, authentication, configuration, models, errors, and transfer behavior. Filesystem code must not import CLI user-interface modules, invoke the console entry point, shell out to Git or Git LFS, or require a repository checkout. Importing the package must not itself inspect Git state, access a credential store, or perform network I/O.
 

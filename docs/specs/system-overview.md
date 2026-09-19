@@ -88,7 +88,7 @@ The `niyan` CLI is the recommended dataset-oriented workflow and coordinates Git
 
 Direct Git and Git LFS operations against a Niyān dataset are also supported. Standard clients use the same access tokens, smart-HTTP repository endpoints, Git LFS Batch API, and server policy. Users who choose those clients are responsible for ordinary Git decisions such as clone depth, merge strategy, and `.gitattributes` rules, and may not receive every convenience or resilient-transfer feature of the Niyān CLI.
 
-The CLI is the console entry point of the unified `niyan` Python distribution. `pipx install niyan` is the standard isolated PyPI installation. A single-command bootstrap installer, published checksums, and a documented manual installation path provide a polished alternative without asking users to manage a virtual environment themselves.
+The CLI is the console entry point of the unified `niyan` Python distribution. `pipx install niyan` is the standard isolated PyPI installation and does not ask users to create or activate a virtual environment themselves. A separate bootstrap installer is not part of v1.
 
 ### Python Filesystem Client
 

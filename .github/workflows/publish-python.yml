@@ -1,0 +1,85 @@
+name: Publish Python package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Verify and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: clients/python/uv.lock
+      - name: Verify release tag and changelog
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+
+          root = pathlib.Path.cwd()
+          project = tomllib.loads((root / 'clients/python/pyproject.toml').read_text())
+          version = project['project']['version']
+          expected_tag = f'v{version}'
+          if os.environ['RELEASE_TAG'] != expected_tag:
+              raise SystemExit(f'Release tag {os.environ["RELEASE_TAG"]!r} must equal {expected_tag!r}.')
+          if f'## [{version}]' not in (root / 'CHANGELOG.md').read_text():
+              raise SystemExit(f'CHANGELOG.md has no release section for {version}.')
+          PY
+      - name: Run package tests
+        working-directory: clients/python
+        run: |
+          uv sync --frozen
+          .venv/bin/python -m unittest discover -s tests
+      - name: Build reproducible distributions
+        working-directory: clients/python
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          uv build --out-dir dist
+          uv build --out-dir /tmp/niyan-rebuild
+          (cd dist && sha256sum *) > /tmp/niyan-first.sha256
+          (cd /tmp/niyan-rebuild && sha256sum *) > /tmp/niyan-second.sha256
+          diff -u /tmp/niyan-first.sha256 /tmp/niyan-second.sha256
+      - name: Smoke-test wheel
+        working-directory: clients/python
+        run: |
+          uv venv /tmp/niyan-release-smoke
+          uv pip install --python /tmp/niyan-release-smoke/bin/python dist/*.whl
+          /tmp/niyan-release-smoke/bin/niyan --version
+          /tmp/niyan-release-smoke/bin/python -c "import fsspec, niyan, niyan.filesystem; assert fsspec.get_filesystem_class('niyan') is niyan.filesystem.NiyanFileSystem"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: python-package
+          path: clients/python/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/niyan
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: python-package
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -16,13 +16,9 @@ The v1 CLI is implemented in Python 3.11 or newer as the `niyan` console entry p
 
 The CLI and filesystem client remain separate internal modules. They may share narrowly scoped HTTP, authentication, configuration, models, errors, and transfer primitives. Importing or using the filesystem client must not initialize CLI state, inspect a Git checkout, invoke Git or Git LFS, access a credential store, or perform network I/O unless the requested filesystem operation requires it.
 
-The primary installation path must be a project-controlled `curl -fsSL ... | sh` bootstrap installer. The installer detects the operating system and architecture, downloads a versioned native executable archive, verifies it against the release's published SHA-256 checksum before installation, and installs `niyan` into `~/.local/bin` by default. It must never invoke `sudo` automatically. `NIYAN_INSTALL_DIR` may select another installation directory and `NIYAN_VERSION` may select an exact CLI version.
+`pipx install niyan` is the standard isolated installation from PyPI. Installing `niyan` into a project environment through pip or uv provides both the importable filesystem client and the environment-local console entry point. A separate native bootstrap installer is deferred and is not part of the v1 installation contract.
 
-Release artifacts must initially cover supported Unix-compatible Linux and macOS architectures. The same checksummed archives must be downloadable manually for offline or inspected installation. Re-running the installer is the v1 upgrade mechanism. Package-manager formulae and a self-update command may be added later without changing the CLI contract.
-
-`pipx install niyan` is the standard isolated installation from PyPI. Installing `niyan` into a project environment through pip or uv provides both the importable filesystem client and the environment-local console entry point. The bootstrap installer and PyPI installation must expose the same CLI behavior and version.
-
-Git and Git LFS remain external dependencies for repository-oriented CLI commands. The installer must not modify the system package manager or install them implicitly; it reports missing dependencies and points to installation instructions, while `niyan doctor` reports missing or unsupported versions after installation. Contributors use uv and checked-in lock data.
+Git and Git LFS remain external dependencies for repository-oriented CLI commands. The Python package must not modify the system package manager or install them implicitly; commands report missing dependencies and point to installation instructions, while `niyan doctor` reports missing or unsupported versions after installation. Contributors use uv and checked-in lock data.
 
 ## Command Structure
 

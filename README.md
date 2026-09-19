@@ -6,7 +6,7 @@ The `niyan` Python package combines the recommended command-line experience with
 
 ## Project status
 
-Niyān is under active development and has not reached a stable v1 release. Interfaces may still change between pre-release versions. The accepted product and protocol behavior lives in the [specification index](docs/specs/README.md), and architectural decisions live in the [ADR index](docs/architecture/decisions/README.md).
+Niyān is under active development and has not reached a stable v1 release. Interfaces may still change between pre-release versions. The accepted product and protocol behavior lives in the [specification index](docs/specs/README.md), architectural decisions live in the [ADR index](docs/architecture/decisions/README.md), and user-facing release changes are recorded in the [changelog](CHANGELOG.md).
 
 ## Repository layout
 
@@ -23,3 +23,5 @@ Component setup is documented in each component README. Production operators sho
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. General support expectations are in [SUPPORT.md](SUPPORT.md), and vulnerabilities must follow [SECURITY.md](SECURITY.md) rather than a public issue. Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Niyān is licensed under the [Apache License 2.0](LICENSE).
+
+Maintainers publish the unified Python package using the documented [release process](RELEASING.md).
