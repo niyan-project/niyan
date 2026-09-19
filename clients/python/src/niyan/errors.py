@@ -41,7 +41,3 @@ class GitConflictError(GitError):
 
 class GitDependencyError(GitError):
     """Report a missing local Git or Git LFS dependency."""
-
-
-def _coverage_gate_probe():
-    return False
