@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from datasets.browser_commits import BrowserDraftConflict, BrowserDraftInvalid, create_browser_draft, publish_browser_draft, stage_delete, stage_git_blob, stage_lfs_object
-from datasets.models import BrowserCommitDraft, LfsObject
+from datasets.models import AuditEvent, BrowserCommitDraft, LfsObject
 from datasets.services import create_dataset
 
 
@@ -46,6 +46,9 @@ class BrowserCommitTests(TestCase):
         self.assertEqual(self._git('show', f'{committed.committed_oid}:notes/readme.txt').stdout, b'hello\n')
         parents = self._git('show', '-s', '--format=%P', committed.committed_oid).stdout.strip()
         self.assertEqual(parents, b'')
+        event = AuditEvent.objects.get(action='browser_draft.commit', draft_id=draft.id)
+        self.assertEqual(event.outcome, AuditEvent.Outcome.ACCEPTED)
+        self.assertEqual(event.payload['commit_oid'], committed.committed_oid)
 
     def test_publish_rejects_branch_movement_and_leaves_draft_open(self):
         """Expected-old-object publication never commits onto a changed branch."""
@@ -63,6 +66,12 @@ class BrowserCommitTests(TestCase):
 
         draft.refresh_from_db()
         self.assertEqual(draft.state, BrowserCommitDraft.State.OPEN)
+
+        response = self.client.post(f'/api/v1/datasets/{self.dataset.id}/drafts/{draft.id}/commit', {'message': 'Stale'}, content_type='application/json')
+
+        self.assertEqual(response.status_code, 409)
+        rejected = AuditEvent.objects.get(action='browser_draft.commit', draft_id=draft.id, outcome=AuditEvent.Outcome.REJECTED)
+        self.assertEqual(rejected.reason_code, 'branch_moved')
 
     def test_lfs_commit_writes_pointer_and_nearest_standard_attributes(self):
         """A verified LFS identity produces interoperable pointer and attribute blobs."""

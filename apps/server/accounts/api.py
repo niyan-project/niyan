@@ -358,7 +358,7 @@ def revoke_access_token_endpoint(request, token_id: UUID):
     access_token = AccessToken.objects.filter(pk=token_id, user=request.auth).first()
     if access_token is None:
         return Status(404, {'code': 'token_not_found', 'detail': 'The requested access token does not exist.'})
-    revoke_access_token(access_token=access_token)
+    revoke_access_token(access_token=access_token, revoked_by=request.auth, authenticating_token=authenticating_token)
     return Status(204, None)
 
 

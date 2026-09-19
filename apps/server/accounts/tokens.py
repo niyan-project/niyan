@@ -11,6 +11,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import AccessToken, DeviceAuthorization
+from datasets.audit import record_audit_event
+from datasets.models import AuditEvent
 from datasets.selectors import get_visible_dataset, get_visible_dataset_by_path
 
 
@@ -176,8 +178,18 @@ def create_access_token(*, user, name, scopes, origin, dataset=None, expires_at=
         secret_digest=_digest_secret(secret),
         expires_at=selected_expiry,
     )
-    access_token.full_clean()
-    access_token.save()
+    with transaction.atomic():
+        access_token.full_clean()
+        access_token.save()
+        record_audit_event(
+            action='access_token.issued',
+            actor=user,
+            access_token=access_token,
+            scope=AuditEvent.Scope.TOKEN,
+            dataset=dataset,
+            token_id=access_token.id,
+            payload={'origin': origin, 'resource_boundary': access_token.resource_boundary, 'scopes': normalized_scopes, 'expires_at': selected_expiry.isoformat()},
+        )
     return access_token, raw_token
 
 
@@ -202,18 +214,38 @@ def authenticate_access_token(raw_token):
 
     selector, secret = _parse_access_token(raw_token)
     access_token = AccessToken.objects.select_related('user', 'dataset').filter(selector=selector).first()
-    if access_token is None or not hmac.compare_digest(access_token.secret_digest, _digest_secret(secret)):
+    if access_token is None:
         raise InvalidAccessToken
-    if not access_token.user.is_active or not access_token.is_active():
+    if not hmac.compare_digest(access_token.secret_digest, _digest_secret(secret)):
+        record_audit_event(action='access_token.use_rejected', outcome=AuditEvent.Outcome.REJECTED, reason_code='invalid_secret', scope=AuditEvent.Scope.TOKEN, token_id=access_token.id)
+        raise InvalidAccessToken
+    now = timezone.now()
+    if access_token.expires_at <= now:
+        record_audit_event(
+            action='access_token.expired',
+            actor=access_token.user,
+            access_token=access_token,
+            scope=AuditEvent.Scope.TOKEN,
+            dataset=access_token.dataset,
+            token_id=access_token.id,
+            deduplication_key=f'access-token-expired:{access_token.id}',
+        )
+        record_audit_event(action='access_token.use_rejected', outcome=AuditEvent.Outcome.REJECTED, reason_code='expired', actor=access_token.user, access_token=access_token, scope=AuditEvent.Scope.TOKEN, dataset=access_token.dataset, token_id=access_token.id)
+        raise InvalidAccessToken
+    if access_token.revoked_at is not None:
+        record_audit_event(action='access_token.use_rejected', outcome=AuditEvent.Outcome.REJECTED, reason_code='revoked', actor=access_token.user, access_token=access_token, scope=AuditEvent.Scope.TOKEN, dataset=access_token.dataset, token_id=access_token.id)
+        raise InvalidAccessToken
+    if not access_token.user.is_active:
+        record_audit_event(action='access_token.use_rejected', outcome=AuditEvent.Outcome.REJECTED, reason_code='inactive_user', actor=access_token.user, access_token=access_token, scope=AuditEvent.Scope.TOKEN, dataset=access_token.dataset, token_id=access_token.id)
         raise InvalidAccessToken
 
-    used_at = timezone.now()
+    used_at = now
     AccessToken.objects.filter(pk=access_token.pk).update(last_used_at=used_at)
     access_token.last_used_at = used_at
     return access_token
 
 
-def revoke_access_token(*, access_token):
+def revoke_access_token(*, access_token, revoked_by=None, authenticating_token=None):
     """Make an access token unusable while retaining its audit metadata.
 
     Parameters
@@ -227,10 +259,20 @@ def revoke_access_token(*, access_token):
         Revoked token metadata.
     """
 
-    if access_token.revoked_at is None:
-        access_token.revoked_at = timezone.now()
-        access_token.save(update_fields=['revoked_at'])
-    return access_token
+    with transaction.atomic():
+        locked_token = AccessToken.objects.select_for_update().select_related('user', 'dataset__namespace').get(pk=access_token.pk)
+        if locked_token.revoked_at is None:
+            locked_token.revoked_at = timezone.now()
+            locked_token.save(update_fields=['revoked_at'])
+            record_audit_event(
+                action='access_token.revoked',
+                actor=revoked_by or locked_token.user,
+                access_token=authenticating_token,
+                scope=AuditEvent.Scope.TOKEN,
+                dataset=locked_token.dataset,
+                token_id=locked_token.id,
+            )
+        return locked_token
 
 
 def start_device_authorization(*, name, scopes, requested_dataset_path=''):

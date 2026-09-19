@@ -9,7 +9,7 @@ from django.utils import timezone
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
 from datasets.git_push import GitPushDenied, create_push_context, enforce_pre_receive, parse_lfs_pointer, reconcile_git_pushes, record_post_receive
-from datasets.models import DatasetGrant, GitPushLfsLease, GitPushRef, LfsObject, ProtectedRefRule
+from datasets.models import AuditEvent, DatasetGrant, GitPushLfsLease, GitPushRef, LfsObject, ProtectedRefRule
 from datasets.services import create_dataset
 from namespaces.models import NamespaceMembership
 
@@ -93,6 +93,9 @@ class GitPushPolicyTests(TestCase):
 
         self.assertFalse(GitPushRef.objects.filter(push_context=context).exists())
         self.assertNotEqual(self._git('--git-dir', str(self.repository), 'show-ref', '--verify', 'refs/heads/main', check=False).returncode, 0)
+        rejected = AuditEvent.objects.get(action='git.ref_mutation', request_id=context.request_id)
+        self.assertEqual(rejected.outcome, AuditEvent.Outcome.REJECTED)
+        self.assertEqual(rejected.ref_name, 'refs/heads/main')
 
     def test_available_lfs_object_is_leased_then_promoted_after_acceptance(self):
         """Close cleanup races before publication and mark accepted content referenced."""
@@ -123,6 +126,9 @@ class GitPushPolicyTests(TestCase):
         self.assertEqual(lfs_object.state, LfsObject.State.REFERENCED)
         self.assertIsNotNone(context.completed_at)
         self.assertIsNotNone(context.ref_updates.get().accepted_at)
+        accepted = AuditEvent.objects.get(action='git.ref_mutation', request_id=context.request_id)
+        self.assertEqual(accepted.outcome, AuditEvent.Outcome.ACCEPTED)
+        self.assertEqual(accepted.payload['new_oid'], commit)
 
     def test_shared_history_is_leased_for_each_proposed_ref(self):
         """Keep shared LFS content protected whichever proposed ref Git accepts."""

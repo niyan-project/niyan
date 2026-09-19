@@ -25,6 +25,8 @@ V1 records at least:
 - permanent dataset deletion; and
 - administrator recovery actions that bypass normal product policy.
 
+The stable v1 action names are `access_token.issued`, `access_token.expired`, `access_token.revoked`, `access_token.use_rejected`, `group.created`, `group.updated`, `group.deleted`, `group.membership_created`, `group.membership_role_changed`, `group.membership_removed`, `dataset.created`, `dataset.updated`, `dataset.deleted`, `dataset.grant_created`, `dataset.grant_role_changed`, `dataset.grant_revoked`, `dataset.protected_ref_created`, `dataset.protected_ref_updated`, `dataset.protected_ref_deleted`, `git.ref_mutation`, and `browser_draft.commit`. A later action name or payload version is an additive protocol change; repurposing an existing name is not.
+
 Routine successful reads, every signed transfer action, and raw object-storage requests are not audit events in v1 because their volume would obscure collaboration history and risk recording transfer capabilities. Operational access logs remain a deployment concern.
 
 ## Durability and Immutability
@@ -40,6 +42,8 @@ Events are retained indefinitely in v1. Future archival or retention limits requ
 Django superusers can inspect every event through a read-only administrative view. A dataset owner may list events scoped to that dataset, and a group owner may list membership and group-identity events scoped to that group. Product-facing queries never reveal an otherwise inaccessible resource, secret metadata, administrator-only recovery detail, IP address, or user-agent string.
 
 Dataset and group event APIs use deterministic reverse-chronological pagination and require `read_api` plus current owner access. Losing ownership immediately removes audit visibility but does not remove retained events. Users can continue to see their own access-token lifecycle in the existing security interface without receiving unrelated installation audit data.
+
+The v1 query routes are `GET /api/v1/datasets/{dataset_id}/audit-events`, `GET /api/v1/namespaces/{namespace_id}/audit-events`, and `GET /api/v1/auth/audit-events`. Pages accept bounded `limit` and `offset` parameters and order equal timestamps by immutable event UUID. The existing maintenance worker materializes time-based access-token expiry events, while an attempted use records expiry immediately when necessary.
 
 ## Non-goals
 

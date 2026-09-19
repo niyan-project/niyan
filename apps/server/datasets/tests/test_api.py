@@ -9,7 +9,7 @@ from django.utils.dateparse import parse_datetime
 
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
-from datasets.models import Dataset, DatasetGrant, ProtectedRefRule
+from datasets.models import AuditEvent, Dataset, DatasetGrant, ProtectedRefRule
 from datasets.object_storage import ObjectStoreError
 from datasets.repositories import RepositoryDeletionError
 from namespaces.models import Namespace, NamespaceMembership
@@ -405,6 +405,8 @@ class DatasetApiTests(TestCase):
         self.assertFalse(repository_path.exists())
         self.assertEqual(self.client.get(f'/api/v1/datasets/{dataset_id}').status_code, 404)
         self.object_store.delete_prefix.assert_called_once_with(f'datasets/{dataset_id}')
+        event = AuditEvent.objects.get(action='dataset.deleted', dataset_id=dataset_id)
+        self.assertEqual(event.dataset_path, 'researcher/images')
 
     def test_delete_dataset_hides_another_users_dataset(self):
         """Prevent permanent deletion without revealing private dataset existence."""

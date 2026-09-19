@@ -7,9 +7,9 @@ from datasets.lfs_cleanup import cleanup_lfs_orphans
 
 
 class Command(BaseCommand):
-    """Run bounded Git LFS orphan reconciliation as a worker or one-shot task."""
+    """Run bounded storage, Git, draft, and token reconciliation."""
 
-    help = 'Abort expired multipart uploads and delete Git LFS objects whose unreferenced grace period elapsed.'
+    help = 'Reconcile Git pushes, drafts, token expiry, multipart uploads, and unreferenced Git LFS objects.'
 
     def add_arguments(self, parser):
         """Define bounded worker controls without introducing a queue service."""

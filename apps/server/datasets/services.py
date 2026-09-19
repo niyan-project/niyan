@@ -4,7 +4,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.validators import normalize_path_slug
-from datasets.models import Dataset, DatasetGrant, ProtectedRefRule
+from datasets.audit import record_audit_event
+from datasets.models import AuditEvent, Dataset, DatasetGrant, ProtectedRefRule
 from datasets.object_storage import ObjectStoreError, S3ObjectStore
 from datasets.policies import can_create_dataset, can_delete_dataset, can_manage_dataset_grants, can_manage_protected_refs, can_update_dataset
 from datasets.repositories import GitRepositoryStore
@@ -70,6 +71,7 @@ def create_dataset(*, namespace, slug, name, created_by, description='', reposit
             dataset.full_clean()
             dataset.save()
             provisioned_repository = store.create(dataset.id)
+            record_audit_event(action='dataset.created', actor=created_by, scope=AuditEvent.Scope.DATASET, dataset=dataset)
 
         return dataset
     except Exception:
@@ -115,21 +117,33 @@ def update_dataset(*, dataset, updated_by, slug=None, name=None, description=Non
         if locked_dataset.deletion_started_at is not None or not can_update_dataset(user=updated_by, dataset=locked_dataset):
             raise PermissionDenied('You cannot update this dataset.')
 
+        previous_path = locked_dataset.path
+        changed_fields = []
         if slug is not None:
             normalized_slug = normalize_path_slug(slug)
             conflicting_dataset = namespace.datasets.exclude(pk=locked_dataset.pk).filter(slug=normalized_slug).exists()
             if namespace.children.filter(slug=normalized_slug).exists() or conflicting_dataset:
                 raise DatasetPathConflict({'slug': 'This namespace path is already in use.'})
             locked_dataset.slug = normalized_slug
+            changed_fields.append('slug')
 
         if name is not None:
             locked_dataset.name = name
+            changed_fields.append('name')
 
         if description is not None:
             locked_dataset.description = description
+            changed_fields.append('description')
 
         locked_dataset.full_clean()
         locked_dataset.save()
+        record_audit_event(
+            action='dataset.updated',
+            actor=updated_by,
+            scope=AuditEvent.Scope.DATASET,
+            dataset=locked_dataset,
+            payload={'changed_fields': changed_fields, 'previous_path': previous_path},
+        )
 
     return locked_dataset
 
@@ -180,7 +194,9 @@ def delete_dataset(*, dataset, deleted_by, repository_store=None, object_store=N
     store.delete(locked_dataset.id, allow_missing=deletion_already_started)
 
     with transaction.atomic(durable=True):
-        Dataset.objects.select_for_update().get(pk=locked_dataset.pk).delete()
+        locked_dataset = Dataset.objects.select_for_update().select_related('namespace').get(pk=locked_dataset.pk)
+        record_audit_event(action='dataset.deleted', actor=deleted_by, scope=AuditEvent.Scope.DATASET, dataset=locked_dataset)
+        locked_dataset.delete()
 
 
 def create_dataset_grant(*, dataset, role, granted_by, user=None, group_namespace=None):
@@ -220,6 +236,8 @@ def create_dataset_grant(*, dataset, role, granted_by, user=None, group_namespac
         # Let the database's conditional unique constraints arbitrate concurrent duplicate requests so callers receive a stable conflict response.
         grant.full_clean(validate_constraints=False)
         grant.save()
+        principal = {'principal_type': grant.principal_type, 'principal_label': grant.principal_label, 'role': role}
+        record_audit_event(action='dataset.grant_created', actor=granted_by, scope=AuditEvent.Scope.DATASET, dataset=locked_dataset, payload=principal)
         return grant
 
 
@@ -252,9 +270,22 @@ def update_dataset_grant(*, grant, role, updated_by):
         locked_grant = DatasetGrant.objects.select_for_update().select_related('dataset__namespace__parent', 'user', 'group_namespace').get(pk=grant.pk)
         if not can_manage_dataset_grants(user=updated_by, dataset=locked_grant.dataset):
             raise PermissionDenied('You cannot manage grants for this dataset.')
+        previous_role = locked_grant.role
         locked_grant.role = role
         locked_grant.full_clean()
         locked_grant.save(update_fields=['role', 'updated_at'])
+        record_audit_event(
+            action='dataset.grant_role_changed',
+            actor=updated_by,
+            scope=AuditEvent.Scope.DATASET,
+            dataset=locked_grant.dataset,
+            payload={
+                'principal_type': locked_grant.principal_type,
+                'principal_label': locked_grant.principal_label,
+                'previous_role': previous_role,
+                'role': role,
+            },
+        )
         return locked_grant
 
 
@@ -275,9 +306,16 @@ def delete_dataset_grant(*, grant, deleted_by):
     """
 
     with transaction.atomic():
-        locked_grant = DatasetGrant.objects.select_for_update().select_related('dataset__namespace__parent').get(pk=grant.pk)
+        locked_grant = DatasetGrant.objects.select_for_update().select_related('dataset__namespace__parent', 'user', 'group_namespace').get(pk=grant.pk)
         if not can_manage_dataset_grants(user=deleted_by, dataset=locked_grant.dataset):
             raise PermissionDenied('You cannot manage grants for this dataset.')
+        record_audit_event(
+            action='dataset.grant_revoked',
+            actor=deleted_by,
+            scope=AuditEvent.Scope.DATASET,
+            dataset=locked_grant.dataset,
+            payload={'principal_type': locked_grant.principal_type, 'principal_label': locked_grant.principal_label, 'role': locked_grant.role},
+        )
         locked_grant.delete()
 
 
@@ -291,6 +329,13 @@ def create_protected_ref_rule(*, dataset, kind, pattern, minimum_role, deletion_
         rule = ProtectedRefRule(dataset=locked_dataset, kind=kind, pattern=pattern, minimum_role=minimum_role, deletion_minimum_role=deletion_minimum_role)
         rule.full_clean(validate_constraints=False)
         rule.save()
+        record_audit_event(
+            action='dataset.protected_ref_created',
+            actor=created_by,
+            scope=AuditEvent.Scope.DATASET,
+            dataset=locked_dataset,
+            payload={'rule_id': str(rule.id), 'kind': rule.kind, 'pattern': rule.pattern, 'minimum_role': rule.minimum_role, 'deletion_minimum_role': rule.deletion_minimum_role},
+        )
         return rule
 
 
@@ -301,11 +346,27 @@ def update_protected_ref_rule(*, rule, updated_by, kind=None, pattern=None, mini
         locked_rule = ProtectedRefRule.objects.select_for_update().select_related('dataset__namespace__parent').get(pk=rule.pk)
         if not can_manage_protected_refs(user=updated_by, dataset=locked_rule.dataset):
             raise PermissionDenied('You cannot manage protected refs for this dataset.')
+        changed_fields = []
         for field_name, value in {'kind': kind, 'pattern': pattern, 'minimum_role': minimum_role, 'deletion_minimum_role': deletion_minimum_role}.items():
             if value is not None:
                 setattr(locked_rule, field_name, value)
+                changed_fields.append(field_name)
         locked_rule.full_clean(validate_constraints=False)
         locked_rule.save()
+        record_audit_event(
+            action='dataset.protected_ref_updated',
+            actor=updated_by,
+            scope=AuditEvent.Scope.DATASET,
+            dataset=locked_rule.dataset,
+            payload={
+                'rule_id': str(locked_rule.id),
+                'changed_fields': changed_fields,
+                'kind': locked_rule.kind,
+                'pattern': locked_rule.pattern,
+                'minimum_role': locked_rule.minimum_role,
+                'deletion_minimum_role': locked_rule.deletion_minimum_role,
+            },
+        )
         return locked_rule
 
 
@@ -316,4 +377,11 @@ def delete_protected_ref_rule(*, rule, deleted_by):
         locked_rule = ProtectedRefRule.objects.select_for_update().select_related('dataset__namespace__parent').get(pk=rule.pk)
         if not can_manage_protected_refs(user=deleted_by, dataset=locked_rule.dataset):
             raise PermissionDenied('You cannot manage protected refs for this dataset.')
+        record_audit_event(
+            action='dataset.protected_ref_deleted',
+            actor=deleted_by,
+            scope=AuditEvent.Scope.DATASET,
+            dataset=locked_rule.dataset,
+            payload={'rule_id': str(locked_rule.id), 'kind': locked_rule.kind, 'pattern': locked_rule.pattern},
+        )
         locked_rule.delete()

@@ -8,7 +8,8 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from datasets.models import BrowserCommitChange, BrowserCommitDraft, LfsObject, ProtectedRefRule
+from datasets.audit import record_audit_event
+from datasets.models import AuditEvent, BrowserCommitChange, BrowserCommitDraft, LfsObject, ProtectedRefRule
 from datasets.policies import ROLE_LEVELS, get_dataset_role, required_protected_ref_role
 from datasets.repositories import GitRepositoryStore, RepositoryReadError
 
@@ -171,6 +172,22 @@ def publish_browser_draft(*, draft, user, message):
         locked.committed_at = now
         locked.full_clean()
         locked.save(update_fields=['state', 'committed_oid', 'committed_at', 'updated_at'])
+        record_audit_event(
+            action='browser_draft.commit',
+            actor=user,
+            scope=AuditEvent.Scope.DATASET,
+            dataset=locked.dataset,
+            ref_name=ref_name,
+            draft_id=locked.id,
+            payload={
+                'commit_oid': commit_oid,
+                'base_commit': locked.base_commit,
+                'change_count': len(changes),
+                'git_change_count': sum(change.storage == BrowserCommitChange.Storage.GIT for change in changes),
+                'lfs_change_count': sum(change.storage == BrowserCommitChange.Storage.LFS for change in changes),
+                'deletion_count': sum(change.operation == BrowserCommitChange.Operation.DELETE for change in changes),
+            },
+        )
         return locked
 
 

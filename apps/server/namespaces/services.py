@@ -2,6 +2,8 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 
 from accounts.validators import normalize_path_slug
+from datasets.audit import record_audit_event
+from datasets.models import AuditEvent
 from datasets.policies import can_create_group, can_manage_group
 from namespaces.models import Namespace, NamespaceMembership
 
@@ -93,6 +95,14 @@ def create_group(*, name, slug, created_by, parent=None):
             membership = NamespaceMembership(namespace=group, user=created_by, role=NamespaceMembership.Role.OWNER)
             membership.full_clean()
             membership.save()
+            record_audit_event(action='group.created', actor=created_by, scope=AuditEvent.Scope.GROUP, group=group)
+            record_audit_event(
+                action='group.membership_created',
+                actor=created_by,
+                scope=AuditEvent.Scope.GROUP,
+                group=group,
+                payload={'member_user_id': created_by.pk, 'member_username': created_by.username, 'role': membership.role},
+            )
         except IntegrityError as error:
             raise GroupPathConflict({'slug': 'This group path is already in use.'}) from error
         return group
@@ -105,6 +115,8 @@ def update_group(*, group, updated_by, name=None, slug=None):
         locked_group = Namespace.objects.select_for_update().select_related('parent').get(pk=group.pk, kind=Namespace.Kind.GROUP)
         if not can_manage_group(user=updated_by, namespace=locked_group):
             raise PermissionDenied('You cannot update this group.')
+        previous_path = locked_group.path
+        changed_fields = []
         if slug is not None:
             normalized_slug = normalize_path_slug(slug)
             siblings = Namespace.objects.exclude(pk=locked_group.pk).filter(parent=locked_group.parent, slug=normalized_slug)
@@ -112,13 +124,22 @@ def update_group(*, group, updated_by, name=None, slug=None):
             if siblings.exists() or dataset_conflict:
                 raise GroupPathConflict({'slug': 'This group path is already in use.'})
             locked_group.slug = normalized_slug
+            changed_fields.append('slug')
         if name is not None:
             locked_group.name = name
+            changed_fields.append('name')
         locked_group.full_clean()
         try:
             locked_group.save()
         except IntegrityError as error:
             raise GroupPathConflict({'slug': 'This group path is already in use.'}) from error
+        record_audit_event(
+            action='group.updated',
+            actor=updated_by,
+            scope=AuditEvent.Scope.GROUP,
+            group=locked_group,
+            payload={'changed_fields': changed_fields, 'previous_path': previous_path},
+        )
         return locked_group
 
 
@@ -131,6 +152,7 @@ def delete_group(*, group, deleted_by):
             raise PermissionDenied('You cannot delete this group.')
         if locked_group.children.exists() or locked_group.datasets.exists():
             raise GroupNotEmpty('A group containing groups or datasets cannot be deleted.')
+        record_audit_event(action='group.deleted', actor=deleted_by, scope=AuditEvent.Scope.GROUP, group=locked_group)
         locked_group.delete()
 
 
@@ -144,6 +166,13 @@ def create_group_membership(*, group, user, role, created_by):
         membership = NamespaceMembership(namespace=locked_group, user=user, role=role)
         membership.full_clean(validate_constraints=False)
         membership.save()
+        record_audit_event(
+            action='group.membership_created',
+            actor=created_by,
+            scope=AuditEvent.Scope.GROUP,
+            group=locked_group,
+            payload={'member_user_id': user.pk, 'member_username': user.username, 'role': role},
+        )
         return membership
 
 
@@ -156,9 +185,22 @@ def update_group_membership(*, membership, role, updated_by):
             raise PermissionDenied('You cannot manage this group.')
         if locked_membership.role == NamespaceMembership.Role.OWNER and role != NamespaceMembership.Role.OWNER and not locked_membership.namespace.memberships.exclude(pk=locked_membership.pk).filter(role=NamespaceMembership.Role.OWNER).exists():
             raise LastGroupOwner('A group must retain at least one direct owner.')
+        previous_role = locked_membership.role
         locked_membership.role = role
         locked_membership.full_clean()
         locked_membership.save(update_fields=['role', 'updated_at'])
+        record_audit_event(
+            action='group.membership_role_changed',
+            actor=updated_by,
+            scope=AuditEvent.Scope.GROUP,
+            group=locked_membership.namespace,
+            payload={
+                'member_user_id': locked_membership.user_id,
+                'member_username': locked_membership.user.username,
+                'previous_role': previous_role,
+                'role': role,
+            },
+        )
         return locked_membership
 
 
@@ -166,9 +208,20 @@ def delete_group_membership(*, membership, deleted_by):
     """Remove a direct group membership while preserving a direct owner."""
 
     with transaction.atomic():
-        locked_membership = NamespaceMembership.objects.select_for_update().select_related('namespace').get(pk=membership.pk)
+        locked_membership = NamespaceMembership.objects.select_for_update().select_related('namespace', 'user').get(pk=membership.pk)
         if not can_manage_group(user=deleted_by, namespace=locked_membership.namespace):
             raise PermissionDenied('You cannot manage this group.')
         if locked_membership.role == NamespaceMembership.Role.OWNER and not locked_membership.namespace.memberships.exclude(pk=locked_membership.pk).filter(role=NamespaceMembership.Role.OWNER).exists():
             raise LastGroupOwner('A group must retain at least one direct owner.')
+        record_audit_event(
+            action='group.membership_removed',
+            actor=deleted_by,
+            scope=AuditEvent.Scope.GROUP,
+            group=locked_membership.namespace,
+            payload={
+                'member_user_id': locked_membership.user_id,
+                'member_username': locked_membership.user.username,
+                'role': locked_membership.role,
+            },
+        )
         locked_membership.delete()

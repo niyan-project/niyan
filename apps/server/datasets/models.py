@@ -481,3 +481,98 @@ class GitPushLfsLease(models.Model):
         """Return a non-secret operational lease description."""
 
         return f'{self.push_ref_id}:{self.lfs_object_id}'
+
+
+class AuditEventQuerySet(models.QuerySet):
+    """Reject application-level mutation of retained audit evidence."""
+
+    def update(self, **kwargs):
+        """Prevent bulk updates that would bypass model immutability."""
+
+        raise TypeError('Audit events are immutable.')
+
+    def delete(self):
+        """Prevent bulk deletion of indefinitely retained events."""
+
+        raise TypeError('Audit events cannot be deleted.')
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        """Prevent bulk mutation of retained rows."""
+
+        raise TypeError('Audit events are immutable.')
+
+
+class AuditEvent(models.Model):
+    """Retain one bounded, non-secret security or collaboration event."""
+
+    class Outcome(models.TextChoices):
+        """Describe whether the attempted action became visible."""
+
+        ACCEPTED = 'accepted', 'Accepted'
+        REJECTED = 'rejected', 'Rejected'
+
+    class Scope(models.TextChoices):
+        """Identify the product surface to which an event belongs."""
+
+        INSTALLATION = 'installation', 'Installation'
+        GROUP = 'group', 'Group'
+        DATASET = 'dataset', 'Dataset'
+        TOKEN = 'token', 'Access token'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    occurred_at = models.DateTimeField(auto_now_add=True, editable=False)
+    action = models.CharField(max_length=100, db_index=True)
+    outcome = models.CharField(max_length=8, choices=Outcome.choices)
+    reason_code = models.CharField(max_length=100, blank=True)
+    request_id = models.UUIDField(null=True, blank=True, editable=False)
+    actor_user_id = models.BigIntegerField(null=True, blank=True, editable=False)
+    actor_username = models.CharField(max_length=100, blank=True, editable=False)
+    access_token_id = models.UUIDField(null=True, blank=True, editable=False)
+    scope = models.CharField(max_length=12, choices=Scope.choices)
+    group_id = models.UUIDField(null=True, blank=True, editable=False)
+    group_path = models.CharField(max_length=2048, blank=True, editable=False)
+    dataset_id = models.UUIDField(null=True, blank=True, editable=False)
+    dataset_path = models.CharField(max_length=2048, blank=True, editable=False)
+    ref_name = models.CharField(max_length=1024, blank=True, editable=False)
+    token_id = models.UUIDField(null=True, blank=True, editable=False)
+    draft_id = models.UUIDField(null=True, blank=True, editable=False)
+    payload_version = models.PositiveSmallIntegerField(default=1, editable=False)
+    payload = models.JSONField(default=dict, editable=False)
+    deduplication_key = models.CharField(max_length=255, null=True, blank=True, unique=True, editable=False)
+
+    objects = AuditEventQuerySet.as_manager()
+
+    class Meta:
+        """Support deterministic resource-scoped reverse chronology."""
+
+        ordering = ['-occurred_at', '-id']
+        indexes = [
+            models.Index(fields=['dataset_id', '-occurred_at', '-id'], name='audit_dataset_time_idx'),
+            models.Index(fields=['group_id', '-occurred_at', '-id'], name='audit_group_time_idx'),
+            models.Index(fields=['actor_user_id', '-occurred_at', '-id'], name='audit_actor_time_idx'),
+        ]
+
+    def save(self, *args, **kwargs):
+        """Allow insertion while rejecting later mutation.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments passed to Django's model save operation.
+        **kwargs
+            Keyword arguments passed to Django's model save operation.
+        """
+
+        if not self._state.adding:
+            raise TypeError('Audit events are immutable.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """Reject deletion of retained audit evidence."""
+
+        raise TypeError('Audit events cannot be deleted.')
+
+    def __str__(self):
+        """Return a concise event description for administrators."""
+
+        return f'{self.occurred_at}:{self.action}:{self.outcome}'

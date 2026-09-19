@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from datasets.models import BrowserCommitChange, BrowserCommitDraft, Dataset, DatasetGrant, GitPushContext, GitPushLfsLease, GitPushRef, LfsMultipartUpload, LfsObject, ProtectedRefRule
+from datasets.models import AuditEvent, BrowserCommitChange, BrowserCommitDraft, Dataset, DatasetGrant, GitPushContext, GitPushLfsLease, GitPushRef, LfsMultipartUpload, LfsObject, ProtectedRefRule
 
 
 class DatasetGrantInline(admin.TabularInline):
@@ -92,7 +92,7 @@ class ReadOnlyLifecycleAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
-        """Prevent manual mutation of receive evidence."""
+        """Prevent manual mutation of lifecycle evidence."""
 
         return False
 
@@ -100,6 +100,47 @@ class ReadOnlyLifecycleAdmin(admin.ModelAdmin):
         """Leave lifecycle retention to maintenance services."""
 
         return False
+
+
+@admin.register(AuditEvent)
+class AuditEventAdmin(ReadOnlyLifecycleAdmin):
+    """Expose the complete immutable installation audit log to superusers."""
+
+    list_display = ('occurred_at', 'action', 'outcome', 'actor_username', 'scope', 'dataset_path', 'group_path')
+    list_filter = ('outcome', 'scope', 'action')
+    search_fields = ('id', 'request_id', 'actor_username', 'dataset_path', 'group_path', 'ref_name', 'token_id', 'draft_id')
+    readonly_fields = (
+        'id',
+        'occurred_at',
+        'action',
+        'outcome',
+        'reason_code',
+        'request_id',
+        'actor_user_id',
+        'actor_username',
+        'access_token_id',
+        'scope',
+        'group_id',
+        'group_path',
+        'dataset_id',
+        'dataset_path',
+        'ref_name',
+        'token_id',
+        'draft_id',
+        'payload_version',
+        'payload',
+        'deduplication_key',
+    )
+
+    def has_module_permission(self, request):
+        """Limit the installation-wide log to superusers."""
+
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        """Prevent delegated staff permissions from exposing every event."""
+
+        return request.user.is_superuser
 
 
 class BrowserCommitChangeInline(admin.TabularInline):

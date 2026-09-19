@@ -11,7 +11,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.authentication import access_token_permits
-from datasets.models import Dataset, GitPushContext, GitPushLfsLease, GitPushRef, LfsObject, ProtectedRefRule
+from datasets.audit import record_audit_event
+from datasets.models import AuditEvent, Dataset, GitPushContext, GitPushLfsLease, GitPushRef, LfsObject, ProtectedRefRule
 from datasets.policies import ROLE_LEVELS, get_dataset_role, required_protected_ref_role
 from datasets.repositories import GitRepositoryStore, RepositoryReadError
 from namespaces.models import NamespaceMembership
@@ -92,13 +93,23 @@ def enforce_pre_receive(*, context_id, dataset_id, lines, repository_path=None):
 
     normalized_dataset_id = UUID(str(dataset_id))
     repository = _trusted_repository_path(normalized_dataset_id, repository_path)
-    context = _consume_context(context_id=context_id, dataset_id=normalized_dataset_id)
     oid_length = _object_id_length(repository)
     updates = _parse_updates(lines, oid_length=oid_length)
+    try:
+        context = _consume_context(context_id=context_id, dataset_id=normalized_dataset_id)
+    except GitPushDenied:
+        context = GitPushContext.objects.select_related('dataset__namespace', 'user', 'access_token').filter(pk=context_id, dataset_id=normalized_dataset_id).first()
+        if context is not None:
+            _record_rejected_ref_events(context=context, updates=updates)
+        raise
     rules = list(ProtectedRefRule.objects.filter(dataset_id=normalized_dataset_id).only('kind', 'pattern', 'minimum_role', 'deletion_minimum_role'))
-    _enforce_ref_policy(repository=repository, updates=updates, role=context.role, oid_length=oid_length, rules=rules)
-    pointers = _find_new_lfs_pointers(repository=repository, updates=updates)
-    _record_validation(context_id=context.id, updates=updates, pointers=pointers)
+    try:
+        _enforce_ref_policy(repository=repository, updates=updates, role=context.role, oid_length=oid_length, rules=rules)
+        pointers = _find_new_lfs_pointers(repository=repository, updates=updates)
+        _record_validation(context_id=context.id, updates=updates, pointers=pointers)
+    except GitPushDenied:
+        _record_rejected_ref_events(context=context, updates=updates)
+        raise
     return updates
 
 
@@ -540,7 +551,7 @@ def _accept_updates(*, context_id, dataset_id, updates, complete):
 
     now = timezone.now()
     with transaction.atomic():
-        context = GitPushContext.objects.select_for_update().filter(pk=context_id, dataset_id=dataset_id, validated_at__isnull=False).first()
+        context = GitPushContext.objects.select_for_update().select_related('dataset__namespace', 'user', 'access_token').filter(pk=context_id, dataset_id=dataset_id, validated_at__isnull=False).first()
         if context is None:
             raise GitPushUnavailable('Repository policy is temporarily unavailable.')
         accepted_refs = []
@@ -551,6 +562,17 @@ def _accept_updates(*, context_id, dataset_id, updates, complete):
             if push_ref.accepted_at is None:
                 push_ref.accepted_at = now
                 push_ref.save(update_fields=['accepted_at'])
+                record_audit_event(
+                    action='git.ref_mutation',
+                    actor=context.user,
+                    access_token=context.access_token,
+                    request_id=context.request_id,
+                    scope=AuditEvent.Scope.DATASET,
+                    dataset=context.dataset,
+                    ref_name=update.ref_name,
+                    payload={'old_oid': update.old_oid, 'new_oid': update.new_oid},
+                    deduplication_key=f'git-ref-accepted:{push_ref.pk}',
+                )
             accepted_refs.append(push_ref)
 
         lfs_ids = GitPushLfsLease.objects.filter(push_ref__in=accepted_refs).values_list('lfs_object_id', flat=True)
@@ -564,6 +586,27 @@ def _accept_updates(*, context_id, dataset_id, updates, complete):
         if complete and context.completed_at is None:
             context.completed_at = now
             context.save(update_fields=['completed_at'])
+
+
+def _record_rejected_ref_events(*, context, updates):
+    """Append one bounded event per rejected branch or tag proposal."""
+
+    for update in updates:
+        if not update.ref_name.startswith(('refs/heads/', 'refs/tags/')):
+            continue
+        record_audit_event(
+            action='git.ref_mutation',
+            outcome=AuditEvent.Outcome.REJECTED,
+            reason_code='policy_rejected',
+            actor=context.user,
+            access_token=context.access_token,
+            request_id=context.request_id,
+            scope=AuditEvent.Scope.DATASET,
+            dataset=context.dataset,
+            ref_name=update.ref_name,
+            payload={'old_oid': update.old_oid, 'new_oid': update.new_oid},
+            deduplication_key=f'git-ref-rejected:{context.id}:{update.ref_name}',
+        )
 
 
 def _ref_contains_proposal(repository, push_ref):

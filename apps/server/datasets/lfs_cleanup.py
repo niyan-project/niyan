@@ -6,6 +6,7 @@ from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from datasets.audit import record_expired_access_tokens
 from datasets.models import BrowserCommitDraft, LfsMultipartUpload, LfsObject
 from datasets.object_storage import ObjectNotFound, ObjectStoreError, S3ObjectStore
 
@@ -47,6 +48,7 @@ def cleanup_lfs_orphans(*, object_store=None, now=None, batch_size=100):
         raise ValueError('The cleanup batch size must be between 1 and 1000.')
     store = object_store or S3ObjectStore(settings.NIYAN_S3_CONFIGURATION)
     current_time = now or timezone.now()
+    record_expired_access_tokens(now=current_time, batch_size=batch_size)
     grace_cutoff = current_time - timedelta(seconds=settings.NIYAN_LFS_ORPHAN_GRACE_PERIOD_SECONDS)
     aborted = 0
     deleted = 0

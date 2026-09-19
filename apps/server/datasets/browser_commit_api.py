@@ -7,10 +7,11 @@ from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 from ninja import Field, Query, Router, Schema, Status
 
-from accounts.authentication import require_access, session_or_access_token
+from accounts.authentication import get_access_token, require_access, session_or_access_token
+from datasets.audit import record_audit_event
 from datasets.browser_commits import BrowserCommitUnavailable, BrowserDraftConflict, BrowserDraftForbidden, BrowserDraftInvalid, create_browser_draft, discard_browser_draft, publish_browser_draft, stage_delete, stage_git_blob, stage_lfs_object
 from datasets.lfs_transfers import LfsIntegrityError, LfsObjectMissing, LfsTransferUnavailable, finalize_lfs_upload, initiate_multipart_upload, issue_upload_action
-from datasets.models import BrowserCommitDraft, LfsObject
+from datasets.models import AuditEvent, BrowserCommitDraft, LfsObject
 from datasets.object_storage import ObjectStoreError
 from datasets.policies import can_write_repository
 from datasets.selectors import get_visible_dataset
@@ -155,6 +156,18 @@ def _draft_error(error):
     if isinstance(error, BrowserDraftInvalid):
         return Status(422, {'code': 'draft_invalid', 'detail': str(error)})
     return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository operation is temporarily unavailable.'})
+
+
+def _draft_rejection_reason(error):
+    """Map one sanitized domain error to a stable audit reason code."""
+
+    if isinstance(error, BrowserDraftConflict):
+        return 'branch_moved'
+    if isinstance(error, BrowserDraftForbidden):
+        return 'permission_denied'
+    if isinstance(error, BrowserDraftInvalid):
+        return 'validation_failed'
+    return 'repository_unavailable'
 
 
 @router.post('/{dataset_id}/drafts', response={201: DraftResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse, 503: ErrorResponse})
@@ -342,4 +355,15 @@ def publish_draft_endpoint(request, dataset_id: UUID, draft_id: UUID, payload: D
     try:
         return _serialize_draft(publish_browser_draft(draft=draft, user=request.auth, message=payload.message))
     except (BrowserDraftInvalid, BrowserDraftConflict, BrowserDraftForbidden, BrowserCommitUnavailable) as error:
+        record_audit_event(
+            action='browser_draft.commit',
+            outcome=AuditEvent.Outcome.REJECTED,
+            reason_code=_draft_rejection_reason(error),
+            actor=request.auth,
+            access_token=get_access_token(request),
+            scope=AuditEvent.Scope.DATASET,
+            dataset=dataset,
+            ref_name=f'refs/heads/{draft.target_branch}',
+            draft_id=draft.id,
+        )
         return _draft_error(error)
