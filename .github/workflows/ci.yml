@@ -36,7 +36,7 @@ jobs:
       NIYAN_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
       NIYAN_DATABASE_URL: postgresql://niyan:niyan@127.0.0.1:5432/niyan
       NIYAN_TEST_DATABASE_NAME: niyan_test
-      NIYAN_GIT_ROOT: ${{ runner.temp }}/niyan-git
+      NIYAN_GIT_ROOT: /tmp/niyan-git
       NIYAN_S3_BUCKET: ci-only
       AWS_EC2_METADATA_DISABLED: "true"
     steps:
