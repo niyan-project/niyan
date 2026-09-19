@@ -85,8 +85,8 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: clients/python/uv.lock
-      - name: Install Git LFS
-        run: git lfs install
+      - name: Verify Git LFS
+        run: git lfs version
       - name: Install dependencies
         working-directory: clients/python
         run: uv sync --frozen
