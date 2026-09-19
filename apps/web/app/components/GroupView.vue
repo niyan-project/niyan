@@ -15,7 +15,7 @@ const editForm = reactive({ name: props.group.name, slug: props.group.slug })
 const deleteConfirmation = ref('')
 const userQuery = ref('')
 const userResults = ref<UserSearchItem[]>([])
-const membershipForm = reactive<{ user_id: number | undefined, role: Role }>({ user_id: undefined, role: 'reader' })
+const membershipForm = reactive<{ username: string, role: Role }>({ username: '', role: 'reader' })
 const { data: groupData, refresh: refreshGroup } = await useAsyncData(`group:${props.group.id}`, async () => {
   const [namespacePage, datasetPage] = await Promise.all([
     api.get<NamespaceList>('/api/v1/namespaces?limit=100'),
@@ -66,11 +66,11 @@ async function searchUsers() {
 }
 
 async function addMember() {
-  if (!membershipForm.user_id) return
+  if (!membershipForm.username) return
   saving.value = true
   try {
     await api.post(`/api/v1/namespaces/${props.group.id}/memberships`, membershipForm)
-    Object.assign(membershipForm, { user_id: undefined, role: 'reader' })
+    Object.assign(membershipForm, { username: '', role: 'reader' })
     userResults.value = []
     userQuery.value = ''
     await refreshGroup()
@@ -183,9 +183,9 @@ async function deleteGroup() {
           <UButton label="Search" color="neutral" variant="outline" @click="searchUsers" />
         </div>
         <div v-if="userResults.length" class="mt-4 grid gap-3 sm:grid-cols-[1fr_12rem_auto]">
-          <USelect v-model="membershipForm.user_id" :items="userResults.map(user => ({ label: `${user.display_name} (${user.username})`, value: user.id }))" placeholder="Select user" />
+          <USelect v-model="membershipForm.username" :items="userResults.map(user => ({ label: `${user.display_name} (${user.username})`, value: user.username }))" placeholder="Select user" />
           <USelect v-model="membershipForm.role" :items="['reader', 'contributor', 'maintainer', 'owner']" />
-          <UButton label="Add" :loading="saving" :disabled="!membershipForm.user_id" @click="addMember" />
+          <UButton label="Add" :loading="saving" :disabled="!membershipForm.username" @click="addMember" />
         </div>
       </UCard>
       <div class="overflow-hidden rounded-lg border border-default">

@@ -76,7 +76,7 @@ class GroupUpdateInput(Schema):
 class MembershipCreateInput(Schema):
     """Describe one direct user membership in a group."""
 
-    user_id: int
+    username: str = Field(min_length=1, max_length=150)
     role: Literal['reader', 'contributor', 'maintainer', 'owner']
 
 
@@ -259,7 +259,7 @@ def create_group_membership_endpoint(request, namespace_id: UUID, payload: Membe
     group = get_manageable_group(namespace_id=namespace_id, user=request.auth)
     if group is None:
         return Status(404, {'code': 'group_not_found', 'detail': 'The requested group does not exist.'})
-    user = get_user_model().objects.filter(pk=payload.user_id, is_active=True).first()
+    user = get_user_model().objects.filter(username=payload.username, is_active=True).first()
     if user is None:
         return Status(404, {'code': 'user_not_found', 'detail': 'The requested user does not exist.'})
     try:

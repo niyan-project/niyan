@@ -127,7 +127,7 @@ class NamespaceApiTests(TestCase):
 
         create_response = self.client.post(
             f'/api/v1/namespaces/{group.id}/memberships',
-            {'user_id': colleague.id, 'role': 'reader'},
+            {'username': colleague.username, 'role': 'reader'},
             content_type='application/json',
         )
         membership_id = create_response.json()['id']
@@ -144,3 +144,35 @@ class NamespaceApiTests(TestCase):
         self.assertEqual(update_response.json()['role'], 'maintainer')
         self.assertEqual(last_owner_response.status_code, 409)
         self.assertEqual(delete_response.status_code, 204)
+
+    def test_group_membership_requires_an_exact_existing_active_username(self):
+        """Avoid ambiguous user selection and pending invitation state."""
+
+        group = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Laboratory', slug='lab')
+        NamespaceMembership.objects.create(namespace=group, user=self.user, role=NamespaceMembership.Role.OWNER)
+        User.objects.create_user(username='colleague', is_active=False)
+
+        unknown_response = self.client.post(
+            f'/api/v1/namespaces/{group.id}/memberships',
+            {'username': 'COLLEAGUE', 'role': 'reader'},
+            content_type='application/json',
+        )
+        inactive_response = self.client.post(
+            f'/api/v1/namespaces/{group.id}/memberships',
+            {'username': 'colleague', 'role': 'reader'},
+            content_type='application/json',
+        )
+
+        self.assertEqual(unknown_response.status_code, 404)
+        self.assertEqual(inactive_response.status_code, 404)
+        self.assertEqual(NamespaceMembership.objects.filter(namespace=group).count(), 1)
+
+    def test_non_owner_cannot_discover_group_membership_administration(self):
+        """Hide direct membership metadata from a visible non-owner."""
+
+        group = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Laboratory', slug='lab')
+        NamespaceMembership.objects.create(namespace=group, user=self.user, role=NamespaceMembership.Role.READER)
+
+        response = self.client.get(f'/api/v1/namespaces/{group.id}/memberships')
+
+        self.assertEqual(response.status_code, 404)
