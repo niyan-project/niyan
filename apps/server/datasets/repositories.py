@@ -37,8 +37,8 @@ class ProvisionedRepository:
         """
 
         root = self.root.resolve()
-        path = self.path.resolve(strict=False)
-        if path == root or path.parent != root:
+        path = self.path.absolute()
+        if path == root or path.parent.resolve() != root:
             raise RepositoryProvisioningError('Refusing to remove a repository outside the configured repository root.')
         if path.is_symlink():
             path.unlink()
