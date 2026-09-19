@@ -1,0 +1,36 @@
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  status:
+    project:
+      default: off
+      server:
+        flags:
+          - server
+        informational: true
+        target: auto
+      python-client:
+        flags:
+          - python-client
+        informational: true
+        target: auto
+    patch:
+      default: off
+
+comment:
+  behavior: default
+  layout: "header, diff, flags, files"
+  require_base: true
+  require_changes: false
+  require_head: true
+
+flags:
+  server:
+    carryforward: false
+    paths:
+      - apps/server/
+  python-client:
+    carryforward: false
+    paths:
+      - clients/python/

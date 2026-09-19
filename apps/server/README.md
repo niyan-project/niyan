@@ -1,5 +1,9 @@
 # Niyān Server
 
+[![Server coverage](https://codecov.io/github/niyan-project/niyan/graph/badge.svg?flag=server)](https://app.codecov.io/github/niyan-project/niyan)
+[![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Django 5.2 LTS](https://img.shields.io/badge/Django-5.2_LTS-092E20?logo=django&logoColor=white)](https://www.djangoproject.com/)
+
 ## Runtime configuration
 
 The server reads runtime configuration from environment variables. For local development, `django-environ` loads the gitignored `.env` file in this directory; operating-system environment variables take precedence. Start from `.env.example` and provide real values for the deployment.

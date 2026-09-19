@@ -21,12 +21,12 @@ dev = [
 
 [tool.coverage.run]
 branch = true
-omit = ["*/asgi.py", "*/migrations/*", "*/tests/*", "*/wsgi.py"]
+omit = ["manage.py", "*/asgi.py", "*/migrations/*", "*/tests/*", "*/wsgi.py"]
 relative_files = true
-source = ["accounts", "datasets", "namespaces", "project"]
+source = ["."]
 
 [tool.coverage.report]
-omit = ["*/asgi.py", "*/migrations/*", "*/tests/*", "*/wsgi.py"]
+omit = ["manage.py", "*/asgi.py", "*/migrations/*", "*/tests/*", "*/wsgi.py"]
 precision = 1
 show_missing = true
 

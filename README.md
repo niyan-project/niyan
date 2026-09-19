@@ -1,5 +1,9 @@
 # Niyān
 
+[![Continuous integration](https://github.com/niyan-project/niyan/actions/workflows/ci.yml/badge.svg)](https://github.com/niyan-project/niyan/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/github/niyan-project/niyan/graph/badge.svg)](https://app.codecov.io/github/niyan-project/niyan)
+[![License](https://img.shields.io/github/license/niyan-project/niyan)](LICENSE)
+
 Niyān is an open-source, self-hosted data forge for researchers and machine-learning teams. Each dataset is an ordinary Git repository; Git owns commits, trees, branches, tags, and merges, while standard Git LFS stores large content in private S3-compatible object storage. Django provides identity, authorization, policy, and a public REST API, and Nuxt provides the web application.
 
 The `niyan` Python package combines the recommended command-line experience with a read-only `fsspec` filesystem for checkout-free streaming on workstations and HPC systems. Standard Git and Git LFS over HTTPS remain supported for users who prefer them.

@@ -16,6 +16,9 @@ jobs:
   server:
     name: Django, Git, Git LFS, and end-to-end
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
     services:
       postgres:
         image: postgres:17-alpine
@@ -74,6 +77,15 @@ jobs:
           .venv/bin/coverage report
           .venv/bin/coverage xml
           .venv/bin/coverage html
+      - name: Publish server coverage to Codecov
+        uses: codecov/codecov-action@v7.1.1
+        with:
+          disable_search: true
+          fail_ci_if_error: true
+          files: apps/server/coverage.xml
+          flags: server
+          name: server
+          use_oidc: true
       - name: Upload server coverage report
         uses: actions/upload-artifact@v7
         with:
@@ -86,6 +98,9 @@ jobs:
   python-client:
     name: Python client (${{ matrix.python-version }})
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +128,16 @@ jobs:
           .venv/bin/coverage report
           .venv/bin/coverage xml
           .venv/bin/coverage html
+      - name: Publish client coverage to Codecov
+        if: matrix.python-version == '3.13'
+        uses: codecov/codecov-action@v7.1.1
+        with:
+          disable_search: true
+          fail_ci_if_error: true
+          files: clients/python/coverage.xml
+          flags: python-client
+          name: python-client
+          use_oidc: true
       - name: Upload client coverage report
         uses: actions/upload-artifact@v7
         with:
