@@ -62,7 +62,7 @@ The database record must not store branches, tags, commits, directory entries, o
 
 ## Repository Storage
 
-The server must read a required repository-root path from deployment configuration. Each dataset repository must be a standard bare Git repository stored at `<repository-root>/<dataset-uuid>.git`. Namespace and dataset slugs must never be interpolated into filesystem paths.
+The server must read the required repository-root path from `NIYAN_GIT_ROOT`. Each dataset repository must be a standard bare Git repository stored at `<NIYAN_GIT_ROOT>/<dataset-uuid>.git`. Namespace and dataset slugs must never be interpolated into filesystem paths.
 
 New repositories must use `main` as the unborn initial branch. Repository initialization must invoke Git without a shell and must treat paths, process output, and exit status as untrusted input.
 

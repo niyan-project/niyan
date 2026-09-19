@@ -91,7 +91,7 @@ test_database_name = env('NIYAN_TEST_DATABASE_NAME', default=None)
 if test_database_name:
     DATABASES['default'].setdefault('TEST', {})['NAME'] = test_database_name
 
-REPOSITORIES_ROOT = Path(env('NIYAN_REPOSITORIES_ROOT')).expanduser()
+REPOSITORIES_ROOT = Path(env('NIYAN_GIT_ROOT')).expanduser()
 
 try:
     NIYAN_S3_CONFIGURATION = S3Configuration(

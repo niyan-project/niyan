@@ -6,6 +6,8 @@ The server reads runtime configuration from environment variables. For local dev
 
 `django-environ` provides typed environment parsing, including Django database URLs. `psycopg` is the PostgreSQL adapter required by Django for `NIYAN_DATABASE_URL` connections.
 
+`NIYAN_GIT_ROOT` is required and selects the persistent filesystem directory containing UUID-addressed bare dataset repositories. A production installation normally uses a service-owned path such as `/var/lib/niyan/repositories` or a mounted persistent volume. Git LFS object content remains in the configured S3-compatible bucket rather than this directory.
+
 `django-ninja` defines the versioned REST API, validates its request and response schemas, and generates its OpenAPI description so those contracts do not need to be implemented separately on top of Django.
 
 `whitenoise` serves Django admin files and the generated Nuxt application's content-hashed assets in the initial production topology. Build `apps/web`, set `NIYAN_WEB_DIST_ROOT` when using a non-default output path, and run `uv run python manage.py collectstatic --noinput` before starting the production server. Django serves the generated SPA entry document only for routes not owned by the API, Git transport, admin, or static-file boundary.
