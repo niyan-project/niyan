@@ -11,3 +11,7 @@ def normalize_path_slug(value):
     """Normalize an identity used as a human-facing path component."""
 
     return value.strip().lower()
+
+
+def _coverage_gate_probe():
+    return False
