@@ -12,6 +12,7 @@ from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_da
 from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper, fetch_dataset, pull_dataset, push_dataset
 from niyan.lfs_transfer import run_lfs_transfer
+from niyan.project_dependencies import add_dataset_dependency, remove_dataset_dependency, show_dataset_dependencies, update_dataset_dependencies
 from niyan.remote_files import download_remote_paths, show_remote_tree, stream_remote_file
 from niyan.working_copy import create_branch, create_tag, commit_changes, delete_branch, delete_tag, list_branches, list_tags, merge_revision, rename_branch, restore_paths, show_diff, show_log, show_status, stage_paths, switch_branch
 
@@ -101,6 +102,18 @@ def build_parser():
     download_parser.add_argument('--ref', dest='revision', help='Branch, tag, or full commit. Defaults to the dataset default branch.')
     download_parser.add_argument('--output', dest='output_directory', help='Destination directory. Defaults to a dataset-named directory in the current working directory.')
     download_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+
+    dependency_add_parser = dataset_commands.add_parser('add', help='Add a dataset to the current project as a standard Git submodule.')
+    dependency_add_parser.add_argument('dataset_path', help='Dataset path in namespace/dataset form.')
+    dependency_add_parser.add_argument('path', nargs='?', help='Project-relative submodule path. Defaults to the dataset slug.')
+    dependency_add_parser.add_argument('--ref', dest='revision', help='Branch, tag, or full commit. Defaults to the dataset default branch.')
+    dependency_add_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+    dependency_remove_parser = dataset_commands.add_parser('remove', help='Remove and stage one dataset submodule dependency.')
+    dependency_remove_parser.add_argument('path', help='Project-relative submodule path.')
+    dependency_update_parser = dataset_commands.add_parser('update', help='Update one or all dataset submodule dependencies.')
+    dependency_update_parser.add_argument('path', nargs='?', help='Optional project-relative submodule path. Defaults to all moving dependencies.')
+    dependency_update_parser.add_argument('--ref', dest='revision', help='Branch, tag, or full commit to pin explicitly.')
+    dataset_commands.add_parser('status', help='Show dataset submodule dependencies in the current project.')
 
     access_parser = dataset_commands.add_parser('access', help='Manage explicit dataset access grants.')
     access_commands = access_parser.add_subparsers(dest='access_command', required=True)
@@ -338,6 +351,19 @@ def main(argv=None):
         if arguments.command == 'dataset' and arguments.dataset_command == 'download':
             host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
             download_remote_paths(host=host, dataset_path=arguments.dataset_path, repository_paths=arguments.repository_paths, revision=arguments.revision, output_directory=arguments.output_directory, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'add':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            add_dataset_dependency(host=host, dataset_path=arguments.dataset_path, destination=arguments.path, revision=arguments.revision, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'remove':
+            remove_dataset_dependency(dependency_path=arguments.path, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'update':
+            update_dataset_dependencies(dependency_path=arguments.path, revision=arguments.revision, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'status':
+            show_dataset_dependencies(cwd=Path.cwd())
             return 0
         if arguments.command == 'dataset' and arguments.dataset_command == 'access':
             host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())

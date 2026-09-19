@@ -204,6 +204,12 @@ class ApiClient:
         query = urlencode({'revision': revision, 'path': path, 'limit': limit, 'offset': offset})
         return self.request('GET', f'/api/v1/datasets/{dataset_id}/repository/tree?{query}')
 
+    def list_repository_refs(self, dataset_id, *, kind='branches', limit=100, offset=0):
+        """List one page of branch or tag refs for revision classification."""
+
+        query = urlencode({'kind': kind, 'limit': limit, 'offset': offset})
+        return self.request('GET', f'/api/v1/datasets/{dataset_id}/repository/refs?{query}')
+
     def get_repository_blob(self, dataset_id, *, revision, path):
         """Return logical metadata for one repository file.
 

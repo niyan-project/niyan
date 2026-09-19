@@ -127,7 +127,8 @@ class GitHttpBackend:
 
         repository_path = self.repository_store.existing_path(dataset.id)
         environment = self._environment(request=request, repository_path=repository_path, git_path=git_path, service=service, remote_user=remote_user, push_context=push_context)
-        command = ['git']
+        # Authorized readers may pin any commit still reachable from a repository ref. This keeps exact-commit submodule fetches usable without broadening access to unreachable objects.
+        command = ['git', '-c', 'uploadpack.allowReachableSHA1InWant=true']
         if service == RECEIVE_PACK:
             # Enable receive-pack for this authorized subprocess only; never mutate repository configuration or make the service globally anonymous.
             hooks_path = Path(__file__).resolve().with_name('git_hooks')
