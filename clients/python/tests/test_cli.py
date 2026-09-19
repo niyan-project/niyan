@@ -1216,7 +1216,7 @@ class CliGitTests(unittest.TestCase):
 
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(commands[0][-6:], ['-C', str(self.root), 'lfs', 'push', 'origin', 'main'])
-        self.assertEqual(commands[1][-5:], ['-C', str(self.root), 'push', 'origin', 'main:refs/heads/main'])
+        self.assertEqual(commands[1][-6:], ['-C', str(self.root), 'push', '--follow-tags', 'origin', 'main:refs/heads/main'])
         self.assertNotIn('--set-upstream', commands[1])
         self.assertNotIn('niyan_selector_secret', repr(run.call_args_list))
         self.assertNotIn('niyan_environment_secret', repr(run.call_args_list))
@@ -1239,7 +1239,7 @@ class CliGitTests(unittest.TestCase):
             push_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
 
         push_command = run.call_args_list[1].args[0]
-        self.assertEqual(push_command[-6:], ['-C', str(self.root), 'push', '--set-upstream', 'origin', 'experiment:refs/heads/experiment'])
+        self.assertEqual(push_command[-7:], ['-C', str(self.root), 'push', '--follow-tags', '--set-upstream', 'origin', 'experiment:refs/heads/experiment'])
 
     def test_failed_lfs_publication_never_attempts_a_ref_update(self):
         """Keep the remote branch unchanged when any required LFS object is unavailable."""
@@ -1377,6 +1377,19 @@ class GitSynchronizationTests(unittest.TestCase):
             push_dataset(paths=self.paths, stores=self.stores, cwd=self.checkout, environment=self.environment, stderr=io.StringIO())
 
         self.assertEqual(self._git('--git-dir', str(self.remote), 'show', 'main:local.txt').stdout, 'local update\n')
+
+    def test_push_publishes_reachable_annotated_tags(self):
+        """Carry ordinary annotated dataset releases with the current branch."""
+
+        (self.checkout / 'release.txt').write_text('release\n')
+        self._git('-C', str(self.checkout), 'add', 'release.txt')
+        self._git('-C', str(self.checkout), 'commit', '-m', 'Release data')
+        self._git('-C', str(self.checkout), 'tag', '--annotate', '--message', 'Version 1', 'v1')
+
+        with patch('niyan.git._require_checkout', return_value=self.identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'):
+            push_dataset(paths=self.paths, stores=self.stores, cwd=self.checkout, environment=self.environment, stderr=io.StringIO())
+
+        self.assertEqual(self._git('--git-dir', str(self.remote), 'cat-file', '-t', 'refs/tags/v1').stdout.strip(), 'tag')
 
     def test_non_fast_forward_push_preserves_both_local_and_remote_tips(self):
         """Delegate expected-old-object rejection to Git without overwriting either side."""

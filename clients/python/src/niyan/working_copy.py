@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from niyan.errors import GitError
+from niyan.errors import GitConflictError, GitError
 from niyan.git import configure_lfs_transfer, load_checkout_identity
 
 
@@ -505,6 +505,128 @@ def show_log(*, limit=20, cwd=None, stdout=None):
     )
     if history_result.stdout:
         print(os.fsdecode(history_result.stdout), file=output)
+
+
+def list_branches(*, cwd=None, stdout=None):
+    """List local branches, their current marker, and configured upstream."""
+
+    output = stdout or sys.stdout
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    result = _run_git(working_directory, ['for-each-ref', '--sort=refname', '--format=%(if)%(HEAD)%(then)*%(else) %(end)%09%(refname:short)%09%(upstream:short)', 'refs/heads'], operation='list local branches')
+    rendered = os.fsdecode(result.stdout)
+    if rendered:
+        print(rendered, end='' if rendered.endswith('\n') else '\n', file=output)
+
+
+def create_branch(name, *, start_point=None, cwd=None):
+    """Create one local branch without switching to it."""
+
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    arguments = ['branch', '--', name]
+    if start_point is not None:
+        arguments.append(start_point)
+    _run_git(working_directory, arguments, operation=f'create branch {name!r}')
+
+
+def rename_branch(old_name, new_name, *, cwd=None):
+    """Rename one local branch through Git's ordinary move operation."""
+
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    _run_git(working_directory, ['branch', '--move', old_name, new_name], operation=f'rename branch {old_name!r}')
+
+
+def delete_branch(name, *, cwd=None, stdin=None, stdout=None):
+    """Safely delete a merged local branch after interactive confirmation."""
+
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    _confirm_interactive_deletion(kind='branch', name=name, stdin=stdin, stdout=stdout)
+    _run_git(working_directory, ['branch', '--delete', '--', name], operation=f'delete branch {name!r}')
+
+
+def switch_branch(name, *, create=False, start_point=None, cwd=None, stdout=None, stderr=None):
+    """Switch to an existing branch or create and switch to a new branch."""
+
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    arguments = ['switch']
+    if create:
+        arguments.extend(['--create', name])
+        if start_point is not None:
+            arguments.append(start_point)
+    else:
+        if start_point is not None:
+            raise GitError('A start point may only be used with --create.')
+        arguments.extend(['--', name])
+    _run_git(working_directory, arguments, operation=f'switch to branch {name!r}', capture_output=False, stdout=stdout, stderr=stderr)
+
+
+def merge_revision(revision, *, cwd=None, stdout=None, stderr=None):
+    """Merge one Git revision and report unresolved paths without altering them."""
+
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    result = _run_git(working_directory, ['merge', '--no-edit', '--', revision], operation=f'merge {revision!r}', accepted_statuses={0, 1, 128}, capture_output=False, stdout=stdout, stderr=stderr, timeout=None)
+    if result.returncode == 0:
+        return
+    conflicts = _run_git(working_directory, ['diff', '--name-only', '--diff-filter=U', '-z'], operation='inspect merge conflicts').stdout
+    paths = [os.fsdecode(path) for path in conflicts.split(b'\0') if path]
+    if paths:
+        displayed = ', '.join(_display_path(path) for path in paths)
+        raise GitConflictError(f'Merge stopped with whole-file conflicts in: {displayed}. Resolve them, stage the chosen files, and commit the merge.')
+    raise GitError(f'Git could not merge {revision!r}.')
+
+
+def list_tags(*, cwd=None, stdout=None):
+    """List local tag names in deterministic order."""
+
+    output = stdout or sys.stdout
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    result = _run_git(working_directory, ['tag', '--list', '--sort=refname'], operation='list local tags')
+    rendered = os.fsdecode(result.stdout)
+    if rendered:
+        print(rendered, end='' if rendered.endswith('\n') else '\n', file=output)
+
+
+def create_tag(name, *, message=None, cwd=None, stdout=None, stderr=None):
+    """Create an annotated tag at the current commit."""
+
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    arguments = ['tag', '--annotate']
+    if message is not None:
+        arguments.extend(['--message', message])
+    arguments.extend(['--', name])
+    _run_git(working_directory, arguments, operation=f'create tag {name!r}', capture_output=False, stdout=stdout, stderr=stderr)
+
+
+def delete_tag(name, *, cwd=None, stdin=None, stdout=None):
+    """Delete one local tag after interactive confirmation."""
+
+    working_directory = Path(cwd or Path.cwd())
+    _require_checkout(working_directory)
+    _confirm_interactive_deletion(kind='tag', name=name, stdin=stdin, stdout=stdout)
+    _run_git(working_directory, ['tag', '--delete', '--', name], operation=f'delete tag {name!r}')
+
+
+def _confirm_interactive_deletion(*, kind, name, stdin=None, stdout=None):
+    """Require an exact-name confirmation only when standard input is a terminal."""
+
+    input_stream = stdin or sys.stdin
+    try:
+        interactive = input_stream.isatty()
+    except (AttributeError, OSError):
+        interactive = False
+    if not interactive:
+        return
+    output = stdout or sys.stdout
+    print(f'Type {name} to delete local {kind}: ', end='', flush=True, file=output)
+    if input_stream.readline().strip() != name:
+        raise GitError(f'{kind.capitalize()} deletion cancelled.')
 
 
 def parse_porcelain_v2(payload):

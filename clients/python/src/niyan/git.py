@@ -307,7 +307,8 @@ def push_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
             # LFS was deliberately completed above. Suppress the hook's duplicate scan while preserving normal Git push behavior.
             push_environment = dict(child_environment)
             push_environment['GIT_LFS_SKIP_PUSH'] = '1'
-            push_arguments = ['push']
+            # Annotated dataset releases reachable from the published branch travel with it, matching Git's conservative --follow-tags behavior without pushing unrelated tags.
+            push_arguments = ['push', '--follow-tags']
             if upstream is None:
                 push_arguments.append('--set-upstream')
             push_arguments.extend([identity.remote, f'{branch}:refs/heads/{remote_branch}'])

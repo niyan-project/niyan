@@ -231,7 +231,7 @@ niyan tag create <name> [-m <message>]
 niyan tag delete <name>
 ```
 
-Branch and tag mutations remain subject to server policy when pushed. Tag creation produces an annotated tag by default. Merging delegates tree and object semantics to Git. Niyān may explain conflicts but must not attempt semantic merges of CSV, Parquet, images, medical data, or other formats. Competing changes to an LFS-backed file are ordinary whole-file conflicts.
+Branch and tag mutations remain subject to server policy when pushed. Tag creation produces an annotated tag by default, and `niyan push` publishes annotated tags reachable from the branch using Git's conservative `--follow-tags` behavior. Merging delegates tree and object semantics to Git. Niyān may explain conflicts but must not attempt semantic merges of CSV, Parquet, images, medical data, or other formats. Competing changes to an LFS-backed file are ordinary whole-file conflicts.
 
 Destructive branch or tag deletion requires confirmation when an interactive terminal is available. V1 does not expose unrestricted force deletion of remote refs.
 

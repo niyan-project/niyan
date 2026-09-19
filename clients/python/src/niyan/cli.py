@@ -12,7 +12,7 @@ from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_da
 from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper, fetch_dataset, pull_dataset, push_dataset
 from niyan.lfs_transfer import run_lfs_transfer
-from niyan.working_copy import commit_changes, restore_paths, show_diff, show_log, show_status, stage_paths
+from niyan.working_copy import create_branch, create_tag, commit_changes, delete_branch, delete_tag, list_branches, list_tags, merge_revision, rename_branch, restore_paths, show_diff, show_log, show_status, stage_paths, switch_branch
 
 
 def _add_access_target_arguments(parser):
@@ -115,6 +115,35 @@ def build_parser():
     diff_parser.add_argument('--staged', action='store_true', help='Compare the index to HEAD instead of the working tree to the index.')
     log_parser = commands.add_parser('log', help='Show bounded dataset commit history.')
     log_parser.add_argument('--limit', type=_positive_integer, default=20, help='Maximum commits to show. Defaults to 20.')
+
+    branch_parser = commands.add_parser('branch', help='Manage local dataset branches.')
+    branch_commands = branch_parser.add_subparsers(dest='branch_command', required=True)
+    branch_commands.add_parser('list', help='List local branches and upstreams.')
+    branch_create_parser = branch_commands.add_parser('create', help='Create a local branch without switching.')
+    branch_create_parser.add_argument('name')
+    branch_create_parser.add_argument('start_point', nargs='?')
+    branch_rename_parser = branch_commands.add_parser('rename', help='Rename a local branch.')
+    branch_rename_parser.add_argument('old_name')
+    branch_rename_parser.add_argument('new_name')
+    branch_delete_parser = branch_commands.add_parser('delete', help='Safely delete a merged local branch.')
+    branch_delete_parser.add_argument('name')
+
+    switch_parser = commands.add_parser('switch', help='Switch local dataset branches.')
+    switch_parser.add_argument('--create', action='store_true', help='Create the branch before switching to it.')
+    switch_parser.add_argument('branch')
+    switch_parser.add_argument('start_point', nargs='?')
+    merge_parser = commands.add_parser('merge', help='Merge a branch or commit using ordinary Git semantics.')
+    merge_parser.add_argument('revision')
+
+    tag_parser = commands.add_parser('tag', help='Manage local annotated dataset tags.')
+    tag_commands = tag_parser.add_subparsers(dest='tag_command', required=True)
+    tag_commands.add_parser('list', help='List local tags.')
+    tag_create_parser = tag_commands.add_parser('create', help='Create an annotated tag at HEAD.')
+    tag_create_parser.add_argument('name')
+    tag_create_parser.add_argument('-m', '--message', help='Annotation message. Git opens its configured editor when omitted.')
+    tag_delete_parser = tag_commands.add_parser('delete', help='Delete a local tag.')
+    tag_delete_parser.add_argument('name')
+
     commands.add_parser('fetch', help='Fetch remote Git refs without modifying the working tree or downloading LFS objects.')
     pull_parser = commands.add_parser('pull', help='Fast-forward the current branch and materialize its configured LFS working set.')
     pull_parser.add_argument('--full-history', action='store_true', help='Convert a shallow checkout to complete Git history.')
@@ -316,6 +345,32 @@ def main(argv=None):
             return 0
         if arguments.command == 'log':
             show_log(limit=arguments.limit, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'branch':
+            if arguments.branch_command == 'list':
+                list_branches(cwd=Path.cwd())
+            elif arguments.branch_command == 'create':
+                create_branch(arguments.name, start_point=arguments.start_point, cwd=Path.cwd())
+            elif arguments.branch_command == 'rename':
+                rename_branch(arguments.old_name, arguments.new_name, cwd=Path.cwd())
+            else:
+                delete_branch(arguments.name, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'switch':
+            if arguments.start_point is not None and not arguments.create:
+                parser.error('a start point requires --create')
+            switch_branch(arguments.branch, create=arguments.create, start_point=arguments.start_point, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'merge':
+            merge_revision(arguments.revision, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'tag':
+            if arguments.tag_command == 'list':
+                list_tags(cwd=Path.cwd())
+            elif arguments.tag_command == 'create':
+                create_tag(arguments.name, message=arguments.message, cwd=Path.cwd())
+            else:
+                delete_tag(arguments.name, cwd=Path.cwd())
             return 0
         if arguments.command == 'fetch':
             fetch_dataset(paths=paths, stores=stores, cwd=Path.cwd())

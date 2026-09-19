@@ -6,10 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from niyan.cli import build_parser
+from niyan.cli import build_parser, main
 from niyan.config import CheckoutIdentity, Configuration, find_local_config
-from niyan.errors import GitError
-from niyan.working_copy import LFS_POINTER_VERSION, LFS_SIZE_THRESHOLD, commit_changes, parse_porcelain_v2, restore_paths, show_diff, show_log, show_status, stage_paths
+from niyan.errors import GitConflictError, GitError
+from niyan.working_copy import LFS_POINTER_VERSION, LFS_SIZE_THRESHOLD, commit_changes, create_branch, create_tag, delete_branch, delete_tag, list_branches, list_tags, merge_revision, parse_porcelain_v2, rename_branch, restore_paths, show_diff, show_log, show_status, stage_paths, switch_branch
 
 
 DATASET_ID = '22222222-2222-2222-2222-222222222222'
@@ -254,6 +254,99 @@ class WorkingCopyTests(unittest.TestCase):
         self.assertTrue(restore_arguments.staged)
         self.assertEqual(restore_arguments.paths, ['README.md', 'data/file.bin'])
         self.assertEqual(commit_arguments.message, 'Record data')
+
+    def test_branch_workflow_delegates_to_safe_local_git_operations(self):
+        """Create, list, switch, rename, and safely delete ordinary branches."""
+
+        create_branch('experiment', start_point='main', cwd=self.repository)
+        output = io.StringIO()
+        list_branches(cwd=self.repository, stdout=output)
+        self.assertIn('\texperiment\t', output.getvalue())
+        self.assertIn('*\tmain\t', output.getvalue())
+
+        with tempfile.TemporaryFile() as command_output, tempfile.TemporaryFile() as command_errors:
+            switch_branch('experiment', cwd=self.repository, stdout=command_output, stderr=command_errors)
+        rename_branch('experiment', 'analysis', cwd=self.repository)
+        self.assertEqual(self._git('branch', '--show-current').stdout.strip(), b'analysis')
+        with tempfile.TemporaryFile() as command_output, tempfile.TemporaryFile() as command_errors:
+            switch_branch('scratch', create=True, start_point='main', cwd=self.repository, stdout=command_output, stderr=command_errors)
+            switch_branch('main', cwd=self.repository, stdout=command_output, stderr=command_errors)
+
+        class TerminalInput(io.StringIO):
+            """Present deterministic confirmation text as an interactive terminal."""
+
+            def isatty(self):
+                """Report interactive input for deletion confirmation."""
+
+                return True
+
+        with self.assertRaisesRegex(GitError, 'cancelled'):
+            delete_branch('analysis', cwd=self.repository, stdin=TerminalInput('wrong\n'), stdout=io.StringIO())
+        delete_branch('analysis', cwd=self.repository, stdin=TerminalInput('analysis\n'), stdout=io.StringIO())
+        delete_branch('scratch', cwd=self.repository, stdin=io.StringIO(), stdout=io.StringIO())
+        self.assertNotIn(b'analysis', self._git('branch', '--list').stdout)
+
+    def test_merge_preserves_git_conflicts_and_reports_whole_file_paths(self):
+        """Complete clean merges while leaving conflicting files for the user."""
+
+        create_branch('clean-change', start_point='main', cwd=self.repository)
+        with tempfile.TemporaryFile() as command_output, tempfile.TemporaryFile() as command_errors:
+            switch_branch('clean-change', cwd=self.repository, stdout=command_output, stderr=command_errors)
+        (self.repository / 'clean.txt').write_text('clean\n')
+        self._git('add', 'clean.txt')
+        self._git('commit', '-m', 'Clean branch')
+        with tempfile.TemporaryFile() as command_output, tempfile.TemporaryFile() as command_errors:
+            switch_branch('main', cwd=self.repository, stdout=command_output, stderr=command_errors)
+            merge_revision('clean-change', cwd=self.repository, stdout=command_output, stderr=command_errors)
+        self.assertEqual((self.repository / 'clean.txt').read_text(), 'clean\n')
+
+        create_branch('competing', start_point='main', cwd=self.repository)
+        with tempfile.TemporaryFile() as command_output, tempfile.TemporaryFile() as command_errors:
+            switch_branch('competing', cwd=self.repository, stdout=command_output, stderr=command_errors)
+        (self.repository / 'README.md').write_text('# Their images\n')
+        self._git('add', 'README.md')
+        self._git('commit', '-m', 'Their change')
+        with tempfile.TemporaryFile() as command_output, tempfile.TemporaryFile() as command_errors:
+            switch_branch('main', cwd=self.repository, stdout=command_output, stderr=command_errors)
+        (self.repository / 'README.md').write_text('# Our images\n')
+        self._git('add', 'README.md')
+        self._git('commit', '-m', 'Our change')
+
+        with tempfile.TemporaryFile() as command_output, tempfile.TemporaryFile() as command_errors:
+            with self.assertRaisesRegex(GitConflictError, 'whole-file conflicts in: README.md'):
+                merge_revision('competing', cwd=self.repository, stdout=command_output, stderr=command_errors)
+        self.assertTrue((self.repository / '.git' / 'MERGE_HEAD').exists())
+        self.assertEqual(self._git('diff', '--name-only', '--diff-filter=U').stdout.strip(), b'README.md')
+        self._git('merge', '--abort')
+
+    def test_annotated_tag_workflow_lists_and_safely_deletes_tags(self):
+        """Create annotated tags by default and preserve interactive deletion safety."""
+
+        with tempfile.TemporaryFile() as command_output, tempfile.TemporaryFile() as command_errors:
+            create_tag('v1', message='Dataset release', cwd=self.repository, stdout=command_output, stderr=command_errors)
+        self.assertEqual(self._git('cat-file', '-t', 'refs/tags/v1').stdout.strip(), b'tag')
+        output = io.StringIO()
+        list_tags(cwd=self.repository, stdout=output)
+        self.assertEqual(output.getvalue(), 'v1\n')
+        delete_tag('v1', cwd=self.repository, stdin=io.StringIO(), stdout=io.StringIO())
+        self.assertEqual(self._git('tag', '--list').stdout, b'')
+
+    def test_cli_exposes_and_dispatches_branch_merge_and_tag_commands(self):
+        """Connect the accepted grammar to each local Git wrapper."""
+
+        branch_arguments = build_parser().parse_args(['branch', 'create', 'experiment', 'main'])
+        switch_arguments = build_parser().parse_args(['switch', '--create', 'analysis', 'main'])
+        merge_arguments = build_parser().parse_args(['merge', 'experiment'])
+        tag_arguments = build_parser().parse_args(['tag', 'create', 'v1', '--message', 'Release'])
+        self.assertEqual(branch_arguments.start_point, 'main')
+        self.assertTrue(switch_arguments.create)
+        self.assertEqual(merge_arguments.revision, 'experiment')
+        self.assertEqual(tag_arguments.message, 'Release')
+
+        with patch('niyan.cli.Path.cwd', return_value=self.repository), patch('niyan.cli.create_branch') as create_call:
+            status = main(['branch', 'create', 'dispatch', 'main'])
+        self.assertEqual(status, 0)
+        create_call.assert_called_once_with('dispatch', start_point='main', cwd=self.repository)
 
     def test_cli_exposes_add_paths_all_and_mutually_exclusive_overrides(self):
         """Keep the accepted staging grammar available through the public CLI."""
