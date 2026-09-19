@@ -6,9 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-19
+
 ### Added
 
 - Self-hosted Django and Nuxt control plane for ordinary Git and Git LFS dataset repositories.
 - Unified `niyan` CLI and read-only `fsspec` filesystem client.
 - Direct, authorized S3-compatible transfers including resilient multipart uploads.
 - Docker Compose deployment, operational health checks, and cross-component continuous integration.
+
+[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/niyan-project/niyan/releases/tag/v0.1.0
