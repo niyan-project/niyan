@@ -12,6 +12,7 @@ from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_da
 from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper, fetch_dataset, pull_dataset, push_dataset
 from niyan.lfs_transfer import run_lfs_transfer
+from niyan.remote_files import download_remote_paths, show_remote_tree, stream_remote_file
 from niyan.working_copy import create_branch, create_tag, commit_changes, delete_branch, delete_tag, list_branches, list_tags, merge_revision, rename_branch, restore_paths, show_diff, show_log, show_status, stage_paths, switch_branch
 
 
@@ -83,6 +84,23 @@ def build_parser():
     delete_parser.add_argument('dataset_path', nargs='?', help='Dataset path in namespace/dataset form. Prompts when omitted in a terminal.')
     delete_parser.add_argument('--confirm', help='Exact dataset path required for non-interactive deletion.')
     delete_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+
+    tree_parser = dataset_commands.add_parser('tree', help='List a remote dataset directory without a checkout.')
+    tree_parser.add_argument('dataset_path', help='Dataset path in namespace/dataset form.')
+    tree_parser.add_argument('repository_path', nargs='?', default='', help='Optional repository directory path.')
+    tree_parser.add_argument('--ref', dest='revision', help='Branch, tag, or full commit. Defaults to the dataset default branch.')
+    tree_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+    cat_parser = dataset_commands.add_parser('cat', help='Stream one remote dataset file to standard output.')
+    cat_parser.add_argument('dataset_path', help='Dataset path in namespace/dataset form.')
+    cat_parser.add_argument('repository_path', help='Repository file path.')
+    cat_parser.add_argument('--ref', dest='revision', help='Branch, tag, or full commit. Defaults to the dataset default branch.')
+    cat_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+    download_parser = dataset_commands.add_parser('download', help='Download remote dataset files or directories without a checkout.')
+    download_parser.add_argument('dataset_path', help='Dataset path in namespace/dataset form.')
+    download_parser.add_argument('repository_paths', nargs='*', help='Selected repository files or directories. Defaults to the complete dataset tree.')
+    download_parser.add_argument('--ref', dest='revision', help='Branch, tag, or full commit. Defaults to the dataset default branch.')
+    download_parser.add_argument('--output', dest='output_directory', help='Destination directory. Defaults to a dataset-named directory in the current working directory.')
+    download_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
 
     access_parser = dataset_commands.add_parser('access', help='Manage explicit dataset access grants.')
     access_commands = access_parser.add_subparsers(dest='access_command', required=True)
@@ -308,6 +326,18 @@ def main(argv=None):
         if arguments.command == 'dataset' and arguments.dataset_command == 'delete':
             host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
             delete_remote_dataset(host=host, dataset_path=arguments.dataset_path, confirmation=arguments.confirm, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'tree':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            show_remote_tree(host=host, dataset_path=arguments.dataset_path, repository_path=arguments.repository_path, revision=arguments.revision, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'cat':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            stream_remote_file(host=host, dataset_path=arguments.dataset_path, repository_path=arguments.repository_path, revision=arguments.revision, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'download':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            download_remote_paths(host=host, dataset_path=arguments.dataset_path, repository_paths=arguments.repository_paths, revision=arguments.revision, output_directory=arguments.output_directory, paths=paths, stores=stores, cwd=Path.cwd())
             return 0
         if arguments.command == 'dataset' and arguments.dataset_command == 'access':
             host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())

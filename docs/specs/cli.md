@@ -168,7 +168,7 @@ niyan dataset cat <namespace/dataset> <path> [--ref <revision>]
 niyan dataset download <namespace/dataset> [<paths>...] [--ref <revision>] [--output <directory>]
 ```
 
-`dataset tree` lists direct children at a requested revision. `dataset cat` streams exactly one file to standard output and never adds progress text to that stream. `dataset download` retrieves selected files or directories without creating a Git checkout and writes through temporary files before atomically finalizing complete downloads.
+`dataset tree` lists direct children at a requested revision. `dataset cat` streams exactly one file to standard output and never adds progress text to that stream. `dataset download` retrieves selected files or directories without creating a Git checkout and writes through temporary files before atomically finalizing complete downloads. Selected paths retain their repository-relative locations beneath the output directory so equally named files cannot collide. Without `--output`, the destination is a dataset-named directory beneath the current working directory; without selected paths, the complete repository tree is downloaded there.
 
 Every operation resolves the requested branch or tag to an exact commit before reading content. Recursive downloads remain pinned to that commit for their entire duration. LFS content transfers directly from object storage through authorized URLs; ordinary Git blobs use the repository API. Interrupted downloads must not be presented as complete files.
 
