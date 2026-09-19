@@ -8,11 +8,18 @@ from niyan.auth import authentication_status, login, login_with_token, logout, r
 from niyan.cache import prune_cache, show_cache_status
 from niyan.config import AppPaths
 from niyan.credentials import CredentialStores
-from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
+from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_dataset_access, edit_remote_dataset, grant_dataset_access, list_dataset_access, list_remote_datasets, revoke_dataset_access, view_remote_dataset
 from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, NiyanCliError
 from niyan.git import clone_dataset, credential_helper, fetch_dataset, pull_dataset, push_dataset
 from niyan.lfs_transfer import run_lfs_transfer
 from niyan.working_copy import commit_changes, restore_paths, show_diff, show_log, show_status, stage_paths
+
+
+def _add_access_target_arguments(parser):
+    """Add the common dataset and host selectors to an access command."""
+
+    parser.add_argument('dataset_path', nargs='?', help='Dataset path in namespace/dataset form. Defaults to the current Niyān checkout.')
+    parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
 
 
 def build_parser():
@@ -76,6 +83,21 @@ def build_parser():
     delete_parser.add_argument('dataset_path', nargs='?', help='Dataset path in namespace/dataset form. Prompts when omitted in a terminal.')
     delete_parser.add_argument('--confirm', help='Exact dataset path required for non-interactive deletion.')
     delete_parser.add_argument('--host', help='Installation hostname or origin. Defaults to NIYAN_HOST or configured host.')
+
+    access_parser = dataset_commands.add_parser('access', help='Manage explicit dataset access grants.')
+    access_commands = access_parser.add_subparsers(dest='access_command', required=True)
+    access_list_parser = access_commands.add_parser('list', help='List explicit user and group grants.')
+    _add_access_target_arguments(access_list_parser)
+    access_list_parser.add_argument('--json', action='store_true', help='Write stable JSON to standard output.')
+    for command_name, command_help in (('grant', 'Create an explicit dataset grant.'), ('edit', 'Change an explicit dataset grant.'), ('revoke', 'Revoke an explicit dataset grant.')):
+        command_parser = access_commands.add_parser(command_name, help=command_help)
+        _add_access_target_arguments(command_parser)
+        principal = command_parser.add_mutually_exclusive_group(required=True)
+        principal.add_argument('--user', metavar='USERNAME', help='Exact existing username.')
+        principal.add_argument('--group', metavar='GROUP_PATH', help='Visible Niyān group path.')
+        if command_name != 'revoke':
+            command_parser.add_argument('--role', required=True, choices=('reader', 'contributor', 'maintainer', 'owner'))
+        command_parser.add_argument('--json', action='store_true', help='Write stable JSON to standard output.')
 
     commands.add_parser('status', help='Show dataset working-copy and LFS state.')
     add_parser = commands.add_parser('add', help='Stage dataset paths using Niyān’s Git LFS tracking policy.')
@@ -257,6 +279,21 @@ def main(argv=None):
         if arguments.command == 'dataset' and arguments.dataset_command == 'delete':
             host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
             delete_remote_dataset(host=host, dataset_path=arguments.dataset_path, confirmation=arguments.confirm, paths=paths, stores=stores, cwd=Path.cwd())
+            return 0
+        if arguments.command == 'dataset' and arguments.dataset_command == 'access':
+            host = resolve_host(arguments.host, paths=paths, cwd=Path.cwd())
+            common = {'host': host, 'dataset_path': arguments.dataset_path, 'paths': paths, 'stores': stores, 'json_output': arguments.json, 'cwd': Path.cwd()}
+            if arguments.access_command == 'list':
+                list_dataset_access(**common)
+            else:
+                principal_type = 'user' if arguments.user is not None else 'group'
+                principal = arguments.user if arguments.user is not None else arguments.group
+                if arguments.access_command == 'grant':
+                    grant_dataset_access(principal_type=principal_type, principal=principal, role=arguments.role, **common)
+                elif arguments.access_command == 'edit':
+                    edit_dataset_access(principal_type=principal_type, principal=principal, role=arguments.role, **common)
+                else:
+                    revoke_dataset_access(principal_type=principal_type, principal=principal, **common)
             return 0
         if arguments.command == 'status':
             show_status(cwd=Path.cwd())

@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import shutil
 import stat
@@ -13,7 +14,7 @@ from niyan.auth import authentication_status, login, login_with_token, logout, r
 from niyan.cli import _error_exit_status, _read_access_token, build_parser, main
 from niyan.config import AppPaths, CheckoutIdentity, Configuration, CredentialBinding, find_local_config
 from niyan.credentials import CredentialStores, InsecureFileCredentialStore
-from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_remote_dataset, list_remote_datasets, view_remote_dataset
+from niyan.datasets import create_remote_dataset, delete_remote_dataset, edit_dataset_access, edit_remote_dataset, grant_dataset_access, list_dataset_access, list_remote_datasets, revoke_dataset_access, view_remote_dataset
 from niyan.errors import ApiError, ConfigurationError, CredentialError, GitConflictError, GitDependencyError, GitError
 from niyan.git import clone_dataset, credential_helper, fetch_dataset, load_checkout_identity, pull_dataset, push_dataset
 from niyan.http import normalize_host
@@ -159,6 +160,7 @@ class FakeDatasetApi:
 
     calls = []
     deleted = []
+    grants = []
 
     def __init__(self, host, token=None):
         """Remember the host and bearer token selected by the command."""
@@ -211,6 +213,37 @@ class FakeDatasetApi:
         """Record permanent deletion."""
 
         type(self).deleted.append(dataset_id)
+        return 204, {}
+
+    def list_dataset_grants(self, dataset_id):
+        """Return current explicit grants."""
+
+        type(self).calls.append(('list_dataset_grants', dataset_id))
+        return 200, {'count': len(type(self).grants), 'items': [dict(grant) for grant in type(self).grants]}
+
+    def create_dataset_grant(self, dataset_id, *, role, username=None, group_path=None):
+        """Create one deterministic explicit grant."""
+
+        principal_type = 'user' if username is not None else 'group'
+        principal_label = username if username is not None else group_path
+        grant = {'id': len(type(self).grants) + 1, 'dataset_id': dataset_id, 'principal_type': principal_type, 'principal_label': principal_label, 'user_id': 7 if username is not None else None, 'group_namespace_id': None if username is not None else '33333333-3333-3333-3333-333333333333', 'role': role, 'created_at': '2026-09-18T00:00:00Z', 'updated_at': '2026-09-18T00:00:00Z'}
+        type(self).grants.append(grant)
+        type(self).calls.append(('create_dataset_grant', dataset_id, principal_type, principal_label, role))
+        return 201, dict(grant)
+
+    def update_dataset_grant(self, dataset_id, grant_id, *, role):
+        """Change one fake grant role."""
+
+        grant = next(grant for grant in type(self).grants if grant['id'] == grant_id)
+        grant['role'] = role
+        type(self).calls.append(('update_dataset_grant', dataset_id, grant_id, role))
+        return 200, dict(grant)
+
+    def delete_dataset_grant(self, dataset_id, grant_id):
+        """Remove one fake grant."""
+
+        type(self).grants = [grant for grant in type(self).grants if grant['id'] != grant_id]
+        type(self).calls.append(('delete_dataset_grant', dataset_id, grant_id))
         return 204, {}
 
     def get_repository_readme(self, dataset_id, *, revision='main'):
@@ -742,6 +775,9 @@ class CliDatasetForgeTests(unittest.TestCase):
         configuration.set_binding(host='https://niyan.example', binding=self.binding)
         configuration.save(self.paths.global_config)
         self.stores.keyring.set(host='https://niyan.example', token_id=self.binding.token_id, token='niyan_selector_secret')
+        FakeDatasetApi.grants = [
+            {'id': 1, 'dataset_id': '22222222-2222-2222-2222-222222222222', 'principal_type': 'user', 'principal_label': 'colleague', 'user_id': 7, 'group_namespace_id': None, 'role': 'reader', 'created_at': '2026-09-18T00:00:00Z', 'updated_at': '2026-09-18T00:00:00Z'}
+        ]
 
     def tearDown(self):
         """Remove isolated CLI state and fake API history."""
@@ -749,6 +785,7 @@ class CliDatasetForgeTests(unittest.TestCase):
         self.temporary_directory.cleanup()
         FakeDatasetApi.calls = []
         FakeDatasetApi.deleted = []
+        FakeDatasetApi.grants = []
 
     def test_create_resolves_namespace_and_prints_canonical_identity(self):
         """Keep human paths at the CLI boundary and UUIDs at the API boundary."""
@@ -892,6 +929,46 @@ class CliDatasetForgeTests(unittest.TestCase):
         self.assertTrue(clone_arguments.metadata_only)
         self.assertEqual(edit_arguments.slug, 'microscopy')
         self.assertEqual(delete_arguments.confirm, 'researcher/images')
+
+    def test_dataset_access_commands_manage_human_principals_and_label_explicit_roles(self):
+        """List and mutate grants without asking users for database identifiers."""
+
+        list_output = io.StringIO()
+        list_dataset_access(host='https://niyan.example', dataset_path='researcher/images', paths=self.paths, stores=self.stores, cwd=self.root, api_factory=FakeDatasetApi, stdout=list_output)
+        created = grant_dataset_access(host='https://niyan.example', dataset_path='researcher/images', principal_type='group', principal='/analysis/', role='contributor', paths=self.paths, stores=self.stores, cwd=self.root, api_factory=FakeDatasetApi, stdout=io.StringIO())
+        updated = edit_dataset_access(host='https://niyan.example', dataset_path='researcher/images', principal_type='user', principal='colleague', role='maintainer', paths=self.paths, stores=self.stores, cwd=self.root, api_factory=FakeDatasetApi, stdout=io.StringIO())
+        revoked = revoke_dataset_access(host='https://niyan.example', dataset_path='researcher/images', principal_type='group', principal='analysis', paths=self.paths, stores=self.stores, cwd=self.root, api_factory=FakeDatasetApi, stdout=io.StringIO())
+
+        self.assertEqual(list_output.getvalue(), 'Your effective role: owner\nTYPE\tPRINCIPAL\tEXPLICIT ROLE\nuser\tcolleague\treader\n')
+        self.assertEqual(created['principal_label'], 'analysis')
+        self.assertEqual(updated['role'], 'maintainer')
+        self.assertTrue(revoked['revoked'])
+        self.assertEqual([grant['principal_label'] for grant in FakeDatasetApi.grants], ['colleague'])
+
+    def test_dataset_access_json_output_is_stable_and_parser_requires_one_principal(self):
+        """Support automation while keeping user and group selectors exclusive."""
+
+        output = io.StringIO()
+        result = list_dataset_access(host='https://niyan.example', dataset_path='researcher/images', paths=self.paths, stores=self.stores, json_output=True, cwd=self.root, api_factory=FakeDatasetApi, stdout=output)
+        arguments = build_parser().parse_args(['dataset', 'access', 'grant', 'researcher/images', '--user', 'colleague', '--role', 'reader', '--json'])
+
+        self.assertEqual(arguments.user, 'colleague')
+        self.assertTrue(arguments.json)
+        self.assertEqual(output.getvalue(), f'{json.dumps(result, ensure_ascii=False, sort_keys=True)}\n')
+
+    def test_main_dispatches_dataset_access_with_human_principals(self):
+        """Carry the public parser values through to the access workflow."""
+
+        paths = AppPaths(config_home=Path('/tmp/config'), data_home=Path('/tmp/data'))
+        stores = object()
+        with patch('niyan.cli.AppPaths.from_environment', return_value=paths), patch('niyan.cli.CredentialStores', return_value=stores), patch('niyan.cli.resolve_host', return_value='https://niyan.example'), patch('niyan.cli.grant_dataset_access') as grant_call:
+            status = main(['dataset', 'access', 'grant', 'researcher/images', '--group', 'research/vision', '--role', 'contributor', '--json'])
+
+        self.assertEqual(status, 0)
+        self.assertEqual(grant_call.call_args.kwargs['principal_type'], 'group')
+        self.assertEqual(grant_call.call_args.kwargs['principal'], 'research/vision')
+        self.assertEqual(grant_call.call_args.kwargs['role'], 'contributor')
+        self.assertTrue(grant_call.call_args.kwargs['json_output'])
 
 
 class CliGitTests(unittest.TestCase):

@@ -266,6 +266,8 @@ niyan dataset access revoke [<namespace/dataset>] (--user <username> | --group <
 
 The CLI resolves human-facing usernames and Niyān group paths to immutable identities. It never asks users to manipulate database primary keys. Roles are `reader`, `contributor`, `maintainer`, and `owner`. Access commands display the effective consequences of a grant but do not duplicate authorization policy locally; the server remains authoritative.
 
+Every access subcommand accepts `--json` for stable machine-readable output. Human-readable listings label returned rows as explicit grants and note that namespace membership may independently provide effective access; inherited access is never presented as an editable grant.
+
 ## Local Cache
 
 Git LFS cache inspection and safe reclamation use:

@@ -9,9 +9,10 @@ from django.utils.dateparse import parse_datetime
 
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
-from datasets.models import Dataset
+from datasets.models import Dataset, DatasetGrant
 from datasets.object_storage import ObjectStoreError
 from datasets.repositories import RepositoryDeletionError
+from namespaces.models import Namespace, NamespaceMembership
 
 
 class DatasetApiTests(TestCase):
@@ -300,6 +301,45 @@ class DatasetApiTests(TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json(), {'code': 'validation_error', 'detail': 'The request data is invalid.'})
+
+    def test_dataset_grant_api_resolves_exact_human_principals_and_supports_crud(self):
+        """Keep usernames and group paths at the API boundary while mutating immutable grants."""
+
+        dataset_id = self.post_dataset().json()['id']
+        colleague = User.objects.create_user(username='colleague')
+        group = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Analysis', slug='analysis')
+        NamespaceMembership.objects.create(namespace=group, user=self.user, role=NamespaceMembership.Role.OWNER)
+
+        user_response = self.client.post(f'/api/v1/datasets/{dataset_id}/grants', {'username': colleague.username, 'role': 'reader'}, content_type='application/json')
+        group_response = self.client.post(f'/api/v1/datasets/{dataset_id}/grants', {'group_path': group.path, 'role': 'contributor'}, content_type='application/json')
+        list_response = self.client.get(f'/api/v1/datasets/{dataset_id}/grants')
+        update_response = self.client.patch(f"/api/v1/datasets/{dataset_id}/grants/{user_response.json()['id']}", {'role': 'maintainer'}, content_type='application/json')
+        delete_response = self.client.delete(f"/api/v1/datasets/{dataset_id}/grants/{group_response.json()['id']}")
+
+        self.assertEqual(user_response.status_code, 201, user_response.content)
+        self.assertEqual(user_response.json()['principal_label'], 'colleague')
+        self.assertEqual(group_response.status_code, 201, group_response.content)
+        self.assertEqual(group_response.json()['principal_label'], 'analysis')
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json()['count'], 2)
+        self.assertEqual(update_response.json()['role'], 'maintainer')
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertEqual(DatasetGrant.objects.filter(dataset_id=dataset_id).count(), 1)
+
+    def test_dataset_grant_api_hides_inexact_users_and_invisible_groups(self):
+        """Reject unresolved principals without exposing hidden group identity."""
+
+        dataset_id = self.post_dataset().json()['id']
+        User.objects.create_user(username='colleague')
+        hidden_group = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Hidden', slug='hidden')
+
+        inexact_user = self.client.post(f'/api/v1/datasets/{dataset_id}/grants', {'username': 'COLLEAGUE', 'role': 'reader'}, content_type='application/json')
+        hidden_group_response = self.client.post(f'/api/v1/datasets/{dataset_id}/grants', {'group_path': hidden_group.path, 'role': 'reader'}, content_type='application/json')
+
+        self.assertEqual(inexact_user.status_code, 404)
+        self.assertEqual(hidden_group_response.status_code, 404)
+        self.assertEqual(inexact_user.json()['code'], 'principal_not_found')
+        self.assertEqual(hidden_group_response.json()['code'], 'principal_not_found')
 
     def test_delete_dataset_permanently_removes_record_and_repository(self):
         """Remove both control-plane identity and UUID-addressed Git storage."""

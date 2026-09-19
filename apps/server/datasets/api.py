@@ -18,6 +18,7 @@ from datasets.repositories import RepositoryDeletionError, RepositoryProvisionin
 from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_visible_dataset, list_visible_datasets, list_visible_namespace_datasets, resolve_visible_dataset_path
 from datasets.services import DatasetObjectDeletionError, DatasetPathConflict, create_dataset, create_dataset_grant, delete_dataset, delete_dataset_grant, update_dataset, update_dataset_grant
 from namespaces.models import Namespace
+from namespaces.selectors import get_visible_namespace_by_path
 
 
 class DatasetCreateInput(Schema):
@@ -99,8 +100,8 @@ class ErrorResponse(Schema):
 class DatasetGrantCreateInput(Schema):
     """Describe a user or Niyān-group dataset grant."""
 
-    user_id: int | None = None
-    group_namespace_id: UUID | None = None
+    username: str | None = Field(default=None, min_length=1, max_length=150)
+    group_path: str | None = Field(default=None, min_length=1, max_length=2048)
     role: Literal['reader', 'contributor', 'maintainer', 'owner']
 
     @model_validator(mode='after')
@@ -118,7 +119,7 @@ class DatasetGrantCreateInput(Schema):
             If both or neither principal fields are selected.
         """
 
-        if (self.user_id is None) == (self.group_namespace_id is None):
+        if (self.username is None) == (self.group_path is None):
             raise ValueError('Select exactly one dataset grant principal.')
         return self
 
@@ -413,9 +414,11 @@ def create_dataset_grant_endpoint(request, dataset_id: UUID, payload: DatasetGra
     if dataset is None:
         return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
 
-    user = get_user_model().objects.filter(pk=payload.user_id).first() if payload.user_id is not None else None
-    group_namespace = Namespace.objects.filter(pk=payload.group_namespace_id, kind=Namespace.Kind.GROUP).first() if payload.group_namespace_id is not None else None
-    if (payload.user_id is not None and user is None) or (payload.group_namespace_id is not None and group_namespace is None):
+    user = get_user_model().objects.filter(username=payload.username, is_active=True).first() if payload.username is not None else None
+    group_namespace = get_visible_namespace_by_path(namespace_path=payload.group_path, user=request.auth) if payload.group_path is not None else None
+    if group_namespace is not None and group_namespace.kind != Namespace.Kind.GROUP:
+        group_namespace = None
+    if (payload.username is not None and user is None) or (payload.group_path is not None and group_namespace is None):
         return Status(404, {'code': 'principal_not_found', 'detail': 'The requested grant principal does not exist.'})
 
     try:

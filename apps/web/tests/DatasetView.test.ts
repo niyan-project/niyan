@@ -88,4 +88,31 @@ describe('dataset repository view', () => {
     const entry = wrapper.findAll('button').find(button => button.text().includes('notes.txt'))
     expect(entry?.attributes('type')).toBe('button')
   })
+
+  it('uses usernames and group paths as human-facing access principals', async () => {
+    currentRoute.query = { tab: 'access' }
+    currentRoute.fullPath = '/lab/images?tab=access'
+    api.get.mockImplementation((url: string) => {
+      if (url.includes('refs?kind=branches')) return Promise.resolve({ items: [{ name: 'main' }] })
+      if (url.includes('refs?kind=tags')) return Promise.resolve({ items: [] })
+      if (url.endsWith('/grants')) return Promise.resolve({ count: 0, items: [] })
+      if (url === '/api/v1/namespaces?limit=100') return Promise.resolve({ items: [{ id: 'group-id', parent_id: null, parent_path: null, path: 'research/vision', slug: 'vision', name: 'Vision', kind: 'group', role: 'owner', can_create_dataset: true, can_manage: true, created_at: '2030-01-01T00:00:00Z', updated_at: '2030-01-01T00:00:00Z' }] })
+      if (url.includes('/api/v1/auth/users?')) return Promise.resolve({ items: [{ id: 7, username: 'colleague', display_name: 'Colleague' }] })
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    const wrapper = await mountSuspended(DatasetView, { props: { dataset } })
+    await flushPromises()
+
+    const searchInput = wrapper.find('input[placeholder="Search users"]')
+    await searchInput.setValue('colleague')
+    await wrapper.find('button[aria-label="Search users"]').trigger('click')
+    await flushPromises()
+
+    const selects = wrapper.findAllComponents({ name: 'USelect' })
+    expect(selects.some(select => JSON.stringify(select.props('items')) === JSON.stringify([{ label: 'Colleague (colleague)', value: 'colleague' }]))).toBe(true)
+    const principalTypeSelect = selects.find(select => JSON.stringify(select.props('items')).includes('"value":"user"'))!
+    await principalTypeSelect.vm.$emit('update:modelValue', 'group')
+    await flushPromises()
+    expect(wrapper.findAllComponents({ name: 'USelect' }).some(select => JSON.stringify(select.props('items')) === JSON.stringify([{ label: 'research/vision', value: 'research/vision' }]))).toBe(true)
+  })
 })

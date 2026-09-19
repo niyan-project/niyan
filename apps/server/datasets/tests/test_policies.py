@@ -103,7 +103,7 @@ class DatasetGrantApiTests(TestCase):
 
         create_response = self.client.post(
             f'/api/v1/datasets/{self.dataset.id}/grants',
-            {'user_id': self.collaborator.id, 'role': 'reader'},
+            {'username': self.collaborator.username, 'role': 'reader'},
             content_type='application/json',
         )
         self.assertEqual(create_response.status_code, 201)
@@ -136,7 +136,7 @@ class DatasetGrantApiTests(TestCase):
 
         response = self.client.post(
             f'/api/v1/datasets/{self.dataset.id}/grants',
-            {'user_id': self.owner.id, 'role': 'reader'},
+            {'username': self.owner.username, 'role': 'reader'},
             content_type='application/json',
         )
 
@@ -147,7 +147,7 @@ class DatasetGrantApiTests(TestCase):
 
         response = self.client.post(
             f'/api/v1/datasets/{self.dataset.id}/grants',
-            {'group_namespace_id': str(self.collaborator.personal_namespace.id), 'role': 'reader'},
+            {'group_path': self.collaborator.personal_namespace.path, 'role': 'reader'},
             content_type='application/json',
         )
 
@@ -158,10 +158,11 @@ class DatasetGrantApiTests(TestCase):
         """Expose Niyān namespaces, rather than Django groups, as principals."""
 
         group = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Collaborators', slug='collaborators')
+        NamespaceMembership.objects.create(namespace=group, user=self.owner, role=NamespaceMembership.Role.OWNER)
 
         response = self.client.post(
             f'/api/v1/datasets/{self.dataset.id}/grants',
-            {'group_namespace_id': str(group.id), 'role': 'reader'},
+            {'group_path': group.path, 'role': 'reader'},
             content_type='application/json',
         )
 
@@ -176,7 +177,7 @@ class DatasetGrantApiTests(TestCase):
 
         response = self.client.post(
             f'/api/v1/datasets/{self.dataset.id}/grants',
-            {'user_id': self.collaborator.id, 'role': 'contributor'},
+            {'username': self.collaborator.username, 'role': 'contributor'},
             content_type='application/json',
         )
 

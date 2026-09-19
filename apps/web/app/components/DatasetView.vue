@@ -20,9 +20,9 @@ const deleteConfirmation = ref('')
 const userQuery = ref('')
 const userResults = ref<UserSearchItem[]>([])
 const grantForm = reactive<{ principal_type: 'user' | 'group', role: Role }>({ principal_type: 'user', role: 'reader' })
-const userGrantId = ref<number>()
-const groupGrantId = ref<string>()
-const selectedGrantPrincipal = computed(() => grantForm.principal_type === 'user' ? userGrantId.value : groupGrantId.value)
+const userGrantUsername = ref<string>()
+const groupGrantPath = ref<string>()
+const selectedGrantPrincipal = computed(() => grantForm.principal_type === 'user' ? userGrantUsername.value : groupGrantPath.value)
 const canManage = computed(() => props.dataset.role === 'owner')
 const canEdit = computed(() => ['owner', 'maintainer'].includes(props.dataset.role))
 const datasetPath = computed(() => `${props.dataset.namespace_path}/${props.dataset.slug}`)
@@ -75,7 +75,7 @@ const { data: initialData, error: loadError } = await useAsyncData(`dataset-view
       api.get<NamespaceList>('/api/v1/namespaces?limit=100')
     ])
     grants = grantPage.items
-    groupCandidates = namespacePage.items.filter(item => item.kind === 'group' && item.id !== props.dataset.namespace_id).map(item => ({ label: item.path, value: item.id }))
+    groupCandidates = namespacePage.items.filter(item => item.kind === 'group' && item.id !== props.dataset.namespace_id).map(item => ({ label: item.path, value: item.path }))
   }
 
   return { branches, tags, emptyRepository, tree, readme, commits, grants, groupCandidates }
@@ -105,7 +105,7 @@ async function loadGrants() {
     api.get<NamespaceList>('/api/v1/namespaces?limit=100')
   ])
   grants.value = grantPage.items
-  groupCandidates.value = namespacePage.items.filter(item => item.kind === 'group' && item.id !== props.dataset.namespace_id).map(item => ({ label: item.path, value: item.id }))
+  groupCandidates.value = namespacePage.items.filter(item => item.kind === 'group' && item.id !== props.dataset.namespace_id).map(item => ({ label: item.path, value: item.path }))
 }
 
 async function changeRevision(value: string) {
@@ -145,11 +145,11 @@ async function searchUsers() {
 async function addGrant() {
   if (selectedGrantPrincipal.value === undefined) return
   saving.value = true
-  const payload = grantForm.principal_type === 'user' ? { user_id: userGrantId.value, role: grantForm.role } : { group_namespace_id: groupGrantId.value, role: grantForm.role }
+  const payload = grantForm.principal_type === 'user' ? { username: userGrantUsername.value, role: grantForm.role } : { group_path: groupGrantPath.value, role: grantForm.role }
   try {
     await api.post(`/api/v1/datasets/${props.dataset.id}/grants`, payload)
-    userGrantId.value = undefined
-    groupGrantId.value = undefined
+    userGrantUsername.value = undefined
+    groupGrantPath.value = undefined
     await loadGrants()
   } catch (error) {
     toast.add({ title: 'Could not add grant', description: error instanceof Error ? error.message : undefined, color: 'error' })
@@ -263,13 +263,13 @@ async function deleteDataset() {
       <UCard>
         <template #header><h2 class="font-medium">Add dataset grant</h2></template>
         <div class="grid gap-3 sm:grid-cols-[10rem_minmax(0,1fr)_10rem_auto]">
-          <USelect v-model="grantForm.principal_type" :items="[{ label: 'User', value: 'user' }, { label: 'Group', value: 'group' }]" @update:model-value="userGrantId = undefined; groupGrantId = undefined" />
+          <USelect v-model="grantForm.principal_type" :items="[{ label: 'User', value: 'user' }, { label: 'Group', value: 'group' }]" @update:model-value="userGrantUsername = undefined; groupGrantPath = undefined" />
           <div v-if="grantForm.principal_type === 'user'" class="flex gap-2"><UInput v-model="userQuery" placeholder="Search users" class="flex-1" @keyup.enter="searchUsers" /><UButton icon="i-lucide-search" aria-label="Search users" color="neutral" variant="outline" @click="searchUsers" /></div>
-          <USelect v-else v-model="groupGrantId" :items="groupCandidates" placeholder="Select group" />
+          <USelect v-else v-model="groupGrantPath" :items="groupCandidates" placeholder="Select group" />
           <USelect v-model="grantForm.role" :items="['reader', 'contributor', 'maintainer', 'owner']" />
           <UButton label="Add" :disabled="selectedGrantPrincipal === undefined" :loading="saving" @click="addGrant" />
         </div>
-        <USelect v-if="grantForm.principal_type === 'user' && userResults.length" v-model="userGrantId" class="mt-3 w-full" :items="userResults.map(user => ({ label: `${user.display_name} (${user.username})`, value: user.id }))" placeholder="Select user" />
+        <USelect v-if="grantForm.principal_type === 'user' && userResults.length" v-model="userGrantUsername" class="mt-3 w-full" :items="userResults.map(user => ({ label: `${user.display_name} (${user.username})`, value: user.username }))" placeholder="Select user" />
       </UCard>
       <div class="overflow-hidden rounded-lg border border-default"><div v-for="grant in grants" :key="grant.id" class="grid gap-3 border-b border-default p-4 last:border-b-0 sm:grid-cols-[1fr_12rem_auto] sm:items-center"><div><p class="font-medium text-highlighted">{{ grant.principal_label }}</p><p class="text-sm text-muted">{{ grant.principal_type }}</p></div><USelect :model-value="grant.role" :items="['reader', 'contributor', 'maintainer', 'owner']" @update:model-value="value => changeGrant(grant, value as Role)" /><UButton icon="i-lucide-trash-2" aria-label="Remove grant" color="error" variant="ghost" @click="removeGrant(grant)" /></div><p v-if="!grants.length" class="p-8 text-center text-muted">No explicit grants. Namespace membership may still provide access.</p></div>
     </section>

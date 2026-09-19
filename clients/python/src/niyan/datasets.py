@@ -1,3 +1,4 @@
+import json
 import sys
 import webbrowser
 from pathlib import Path
@@ -163,6 +164,64 @@ def delete_remote_dataset(*, host, dataset_path, confirmation, paths, stores, cw
     print(f'Deleted {canonical_path}', file=output)
 
 
+def list_dataset_access(*, host, dataset_path, paths, stores, json_output=False, cwd=None, api_factory=ApiClient, stdin=None, stdout=None):
+    """List explicit grants without presenting inherited access as editable."""
+
+    output = stdout or sys.stdout
+    api, dataset_id, _ = _resolve_dataset_target(host=host, dataset_path=dataset_path, input_stream=stdin or sys.stdin, working_directory=Path(cwd or Path.cwd()), paths=paths, stores=stores, api_factory=api_factory)
+    _, dataset = api.get_dataset(dataset_id)
+    _, page = api.list_dataset_grants(dataset_id)
+    result = {'dataset_id': dataset_id, 'dataset_path': _dataset_path(dataset), 'effective_role': dataset['role'], 'count': page['count'], 'items': page['items']}
+    if json_output:
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True), file=output)
+        return result
+    print(f"Your effective role: {dataset['role']}", file=output)
+    if not page['items']:
+        print('No explicit grants. Namespace membership may still provide effective access.', file=output)
+        return result
+    print('TYPE\tPRINCIPAL\tEXPLICIT ROLE', file=output)
+    for grant in page['items']:
+        print(f"{grant['principal_type']}\t{grant['principal_label']}\t{grant['role']}", file=output)
+    return result
+
+
+def grant_dataset_access(*, host, dataset_path, principal_type, principal, role, paths, stores, json_output=False, cwd=None, api_factory=ApiClient, stdin=None, stdout=None):
+    """Create an explicit grant for one human-facing principal."""
+
+    output = stdout or sys.stdout
+    api, dataset_id, _ = _resolve_dataset_target(host=host, dataset_path=dataset_path, input_stream=stdin or sys.stdin, working_directory=Path(cwd or Path.cwd()), paths=paths, stores=stores, api_factory=api_factory)
+    arguments = {'username': principal} if principal_type == 'user' else {'group_path': _normalize_namespace_path(principal)}
+    _, grant = api.create_dataset_grant(dataset_id, role=role, **arguments)
+    _print_grant_result(grant, action='Granted', json_output=json_output, output=output)
+    return grant
+
+
+def edit_dataset_access(*, host, dataset_path, principal_type, principal, role, paths, stores, json_output=False, cwd=None, api_factory=ApiClient, stdin=None, stdout=None):
+    """Change one explicit grant selected by exact human-facing identity."""
+
+    output = stdout or sys.stdout
+    api, dataset_id, _ = _resolve_dataset_target(host=host, dataset_path=dataset_path, input_stream=stdin or sys.stdin, working_directory=Path(cwd or Path.cwd()), paths=paths, stores=stores, api_factory=api_factory)
+    grant = _find_explicit_grant(api=api, dataset_id=dataset_id, principal_type=principal_type, principal=principal)
+    _, updated = api.update_dataset_grant(dataset_id, grant['id'], role=role)
+    _print_grant_result(updated, action='Updated', json_output=json_output, output=output)
+    return updated
+
+
+def revoke_dataset_access(*, host, dataset_path, principal_type, principal, paths, stores, json_output=False, cwd=None, api_factory=ApiClient, stdin=None, stdout=None):
+    """Revoke one explicit grant selected by exact human-facing identity."""
+
+    output = stdout or sys.stdout
+    api, dataset_id, _ = _resolve_dataset_target(host=host, dataset_path=dataset_path, input_stream=stdin or sys.stdin, working_directory=Path(cwd or Path.cwd()), paths=paths, stores=stores, api_factory=api_factory)
+    grant = _find_explicit_grant(api=api, dataset_id=dataset_id, principal_type=principal_type, principal=principal)
+    api.delete_dataset_grant(dataset_id, grant['id'])
+    result = {'revoked': True, 'dataset_id': dataset_id, 'principal_type': grant['principal_type'], 'principal': grant['principal_label']}
+    if json_output:
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True), file=output)
+    else:
+        print(f"Revoked {grant['principal_type']} {grant['principal_label']}", file=output)
+    return result
+
+
 def _resolve_dataset_target(*, host, dataset_path, input_stream, working_directory, paths, stores, api_factory):
     """Resolve explicit paths or immutable checkout identity for an API call."""
 
@@ -192,6 +251,28 @@ def _normalize_namespace_path(namespace_path):
     if not normalized or any(not part or part in ('.', '..') for part in normalized.split('/')):
         raise ConfigurationError('Namespace paths must contain one or more valid path components.')
     return normalized
+
+
+def _find_explicit_grant(*, api, dataset_id, principal_type, principal):
+    """Select one exact explicit grant without confusing inherited access."""
+
+    normalized_principal = _normalize_namespace_path(principal) if principal_type == 'group' else principal
+    _, page = api.list_dataset_grants(dataset_id)
+    matches = [grant for grant in page['items'] if grant['principal_type'] == principal_type and grant['principal_label'] == normalized_principal]
+    if not matches:
+        raise ApiError(f'No explicit {principal_type} grant exists for {normalized_principal}.', status=404, code='grant_not_found')
+    if len(matches) != 1:
+        raise ConfigurationError(f'Multiple explicit {principal_type} grants unexpectedly match {normalized_principal}.')
+    return matches[0]
+
+
+def _print_grant_result(grant, *, action, json_output, output):
+    """Render one grant for people or automation."""
+
+    if json_output:
+        print(json.dumps(grant, ensure_ascii=False, sort_keys=True), file=output)
+    else:
+        print(f"{action} {grant['principal_type']} {grant['principal_label']} explicit {grant['role']} access", file=output)
 
 
 def _dataset_path(dataset):

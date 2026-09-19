@@ -363,6 +363,31 @@ class ApiClient:
 
         return self.request('DELETE', f'/api/v1/datasets/{dataset_id}')
 
+    def list_dataset_grants(self, dataset_id):
+        """Return explicit access grants for one owner-managed dataset."""
+
+        return self.request('GET', f'/api/v1/datasets/{dataset_id}/grants')
+
+    def create_dataset_grant(self, dataset_id, *, role, username=None, group_path=None):
+        """Grant one role to an exact username or visible group path."""
+
+        payload = {'role': role}
+        if username is not None:
+            payload['username'] = username
+        if group_path is not None:
+            payload['group_path'] = group_path
+        return self.request('POST', f'/api/v1/datasets/{dataset_id}/grants', payload=payload)
+
+    def update_dataset_grant(self, dataset_id, grant_id, *, role):
+        """Change the explicit role assigned by one immutable grant."""
+
+        return self.request('PATCH', f'/api/v1/datasets/{dataset_id}/grants/{grant_id}', payload={'role': role})
+
+    def delete_dataset_grant(self, dataset_id, grant_id):
+        """Revoke one immutable explicit dataset grant."""
+
+        return self.request('DELETE', f'/api/v1/datasets/{dataset_id}/grants/{grant_id}')
+
     def get_repository_readme(self, dataset_id, *, revision='main'):
         """Return a root README at one repository revision.
 
