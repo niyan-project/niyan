@@ -144,7 +144,7 @@ def finalize_lfs_upload(*, lfs_object, object_store=None, verify_provider_sha256
 
     with transaction.atomic():
         try:
-            locked_object = LfsObject.objects.select_for_update().select_related('dataset').get(pk=lfs_object.pk)
+            locked_object = LfsObject.objects.select_for_update(of=('self',)).select_related('dataset').get(pk=lfs_object.pk)
         except LfsObject.DoesNotExist as error:
             raise LfsTransferUnavailable('This Git LFS object is unavailable.') from error
         if locked_object.dataset.deletion_started_at is not None:
@@ -181,7 +181,7 @@ def initiate_multipart_upload(*, lfs_object, object_store=None, now=None):
     store = object_store or S3ObjectStore(settings.NIYAN_S3_CONFIGURATION)
     current_time = now or timezone.now()
     with transaction.atomic():
-        locked_object = LfsObject.objects.select_for_update().select_related('dataset').get(pk=lfs_object.pk)
+        locked_object = LfsObject.objects.select_for_update(of=('self',)).select_related('dataset').get(pk=lfs_object.pk)
         _require_active_dataset(locked_object)
         if locked_object.state != LfsObject.State.PENDING:
             raise LfsTransferUnavailable('This Git LFS object does not accept multipart uploads.')
@@ -242,7 +242,7 @@ def complete_multipart_upload(*, session, parts, object_store=None, now=None):
     current_time = now or timezone.now()
     with transaction.atomic():
         # Mutating services lock the object before its session so completion, abort, and replacement cannot deadlock or race provider state.
-        locked_object = LfsObject.objects.select_for_update().select_related('dataset').get(pk=session.lfs_object_id)
+        locked_object = LfsObject.objects.select_for_update(of=('self',)).select_related('dataset').get(pk=session.lfs_object_id)
         locked_session = LfsMultipartUpload.objects.select_for_update().get(pk=session.pk)
         locked_session.lfs_object = locked_object
         if locked_session.state == LfsMultipartUpload.State.COMPLETED:
@@ -289,7 +289,7 @@ def abort_multipart_upload(*, session, object_store=None, now=None):
     store = object_store or S3ObjectStore(settings.NIYAN_S3_CONFIGURATION)
     current_time = now or timezone.now()
     with transaction.atomic():
-        locked_object = LfsObject.objects.select_for_update().select_related('dataset').get(pk=session.lfs_object_id)
+        locked_object = LfsObject.objects.select_for_update(of=('self',)).select_related('dataset').get(pk=session.lfs_object_id)
         locked_session = LfsMultipartUpload.objects.select_for_update().get(pk=session.pk)
         locked_session.lfs_object = locked_object
         if locked_session.state == LfsMultipartUpload.State.ABORTED:

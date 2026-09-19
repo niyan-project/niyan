@@ -260,7 +260,7 @@ def revoke_access_token(*, access_token, revoked_by=None, authenticating_token=N
     """
 
     with transaction.atomic():
-        locked_token = AccessToken.objects.select_for_update().select_related('user', 'dataset__namespace').get(pk=access_token.pk)
+        locked_token = AccessToken.objects.select_for_update(of=('self',)).select_related('user', 'dataset__namespace').get(pk=access_token.pk)
         if locked_token.revoked_at is None:
             locked_token.revoked_at = timezone.now()
             locked_token.save(update_fields=['revoked_at'])
@@ -392,7 +392,7 @@ def exchange_device_code(*, raw_device_code):
     authorization_id, secret = _parse_device_code(raw_device_code)
     authorization_pending = False
     with transaction.atomic():
-        authorization = DeviceAuthorization.objects.select_for_update().select_related('approved_by', 'dataset').filter(pk=authorization_id).first()
+        authorization = DeviceAuthorization.objects.select_for_update(of=('self',)).select_related('approved_by', 'dataset').filter(pk=authorization_id).first()
         if authorization is None or not hmac.compare_digest(authorization.device_secret_digest, _digest_secret(secret)):
             raise InvalidDeviceCode
         if authorization.is_expired():

@@ -112,7 +112,7 @@ def update_dataset(*, dataset, updated_by, slug=None, name=None, description=Non
     """
 
     with transaction.atomic():
-        locked_dataset = Dataset.objects.select_for_update().select_related('namespace').get(pk=dataset.pk)
+        locked_dataset = Dataset.objects.select_for_update(of=('self',)).select_related('namespace').get(pk=dataset.pk)
         namespace = locked_dataset.namespace
         if locked_dataset.deletion_started_at is not None or not can_update_dataset(user=updated_by, dataset=locked_dataset):
             raise PermissionDenied('You cannot update this dataset.')
@@ -175,7 +175,7 @@ def delete_dataset(*, dataset, deleted_by, repository_store=None, object_store=N
     store = repository_store or GitRepositoryStore()
     # Persist the irreversible transition before touching storage so an interrupted request can be retried without exposing a half-deleted dataset.
     with transaction.atomic(durable=True):
-        locked_dataset = Dataset.objects.select_for_update().select_related('namespace').get(pk=dataset.pk)
+        locked_dataset = Dataset.objects.select_for_update(of=('self',)).select_related('namespace').get(pk=dataset.pk)
         namespace = locked_dataset.namespace
         if not can_delete_dataset(user=deleted_by, dataset=locked_dataset):
             raise PermissionDenied('You cannot delete this dataset.')
@@ -194,7 +194,7 @@ def delete_dataset(*, dataset, deleted_by, repository_store=None, object_store=N
     store.delete(locked_dataset.id, allow_missing=deletion_already_started)
 
     with transaction.atomic(durable=True):
-        locked_dataset = Dataset.objects.select_for_update().select_related('namespace').get(pk=locked_dataset.pk)
+        locked_dataset = Dataset.objects.select_for_update(of=('self',)).select_related('namespace').get(pk=locked_dataset.pk)
         record_audit_event(action='dataset.deleted', actor=deleted_by, scope=AuditEvent.Scope.DATASET, dataset=locked_dataset)
         locked_dataset.delete()
 
@@ -229,7 +229,7 @@ def create_dataset_grant(*, dataset, role, granted_by, user=None, group_namespac
     """
 
     with transaction.atomic():
-        locked_dataset = Dataset.objects.select_for_update().select_related('namespace__parent').get(pk=dataset.pk)
+        locked_dataset = Dataset.objects.select_for_update(of=('self',)).select_related('namespace__parent').get(pk=dataset.pk)
         if not can_manage_dataset_grants(user=granted_by, dataset=locked_dataset):
             raise PermissionDenied('You cannot manage grants for this dataset.')
         grant = DatasetGrant(dataset=locked_dataset, user=user, group_namespace=group_namespace, role=role)
@@ -267,7 +267,7 @@ def update_dataset_grant(*, grant, role, updated_by):
     """
 
     with transaction.atomic():
-        locked_grant = DatasetGrant.objects.select_for_update().select_related('dataset__namespace__parent', 'user', 'group_namespace').get(pk=grant.pk)
+        locked_grant = DatasetGrant.objects.select_for_update(of=('self',)).select_related('dataset__namespace__parent', 'user', 'group_namespace').get(pk=grant.pk)
         if not can_manage_dataset_grants(user=updated_by, dataset=locked_grant.dataset):
             raise PermissionDenied('You cannot manage grants for this dataset.')
         previous_role = locked_grant.role
@@ -306,7 +306,7 @@ def delete_dataset_grant(*, grant, deleted_by):
     """
 
     with transaction.atomic():
-        locked_grant = DatasetGrant.objects.select_for_update().select_related('dataset__namespace__parent', 'user', 'group_namespace').get(pk=grant.pk)
+        locked_grant = DatasetGrant.objects.select_for_update(of=('self',)).select_related('dataset__namespace__parent', 'user', 'group_namespace').get(pk=grant.pk)
         if not can_manage_dataset_grants(user=deleted_by, dataset=locked_grant.dataset):
             raise PermissionDenied('You cannot manage grants for this dataset.')
         record_audit_event(
@@ -323,7 +323,7 @@ def create_protected_ref_rule(*, dataset, kind, pattern, minimum_role, deletion_
     """Create one stricter branch or tag mutation rule."""
 
     with transaction.atomic():
-        locked_dataset = Dataset.objects.select_for_update().select_related('namespace__parent').get(pk=dataset.pk)
+        locked_dataset = Dataset.objects.select_for_update(of=('self',)).select_related('namespace__parent').get(pk=dataset.pk)
         if not can_manage_protected_refs(user=created_by, dataset=locked_dataset):
             raise PermissionDenied('You cannot manage protected refs for this dataset.')
         rule = ProtectedRefRule(dataset=locked_dataset, kind=kind, pattern=pattern, minimum_role=minimum_role, deletion_minimum_role=deletion_minimum_role)
@@ -343,7 +343,7 @@ def update_protected_ref_rule(*, rule, updated_by, kind=None, pattern=None, mini
     """Update selected fields of one protected-ref rule."""
 
     with transaction.atomic():
-        locked_rule = ProtectedRefRule.objects.select_for_update().select_related('dataset__namespace__parent').get(pk=rule.pk)
+        locked_rule = ProtectedRefRule.objects.select_for_update(of=('self',)).select_related('dataset__namespace__parent').get(pk=rule.pk)
         if not can_manage_protected_refs(user=updated_by, dataset=locked_rule.dataset):
             raise PermissionDenied('You cannot manage protected refs for this dataset.')
         changed_fields = []
@@ -374,7 +374,7 @@ def delete_protected_ref_rule(*, rule, deleted_by):
     """Delete one protected-ref rule after rechecking current authority."""
 
     with transaction.atomic():
-        locked_rule = ProtectedRefRule.objects.select_for_update().select_related('dataset__namespace__parent').get(pk=rule.pk)
+        locked_rule = ProtectedRefRule.objects.select_for_update(of=('self',)).select_related('dataset__namespace__parent').get(pk=rule.pk)
         if not can_manage_protected_refs(user=deleted_by, dataset=locked_rule.dataset):
             raise PermissionDenied('You cannot manage protected refs for this dataset.')
         record_audit_event(

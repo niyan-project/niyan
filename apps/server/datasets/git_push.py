@@ -239,7 +239,7 @@ def _consume_context(*, context_id, dataset_id):
     now = timezone.now()
     with transaction.atomic():
         context = (
-            GitPushContext.objects.select_for_update()
+            GitPushContext.objects.select_for_update(of=('self',))
             .select_related('dataset__namespace', 'user', 'access_token')
             .filter(pk=context_id, dataset_id=dataset_id)
             .first()
@@ -505,7 +505,7 @@ def _record_validation(*, context_id, updates, pointers):
     now = timezone.now()
     lease_expiry = now + timedelta(seconds=settings.NIYAN_GIT_PUSH_LEASE_LIFETIME_SECONDS)
     with transaction.atomic():
-        context = GitPushContext.objects.select_for_update().select_related('dataset__namespace', 'user', 'access_token').get(pk=context_id)
+        context = GitPushContext.objects.select_for_update(of=('self',)).select_related('dataset__namespace', 'user', 'access_token').get(pk=context_id)
         if context.validated_at is not None or context.consumed_at is None:
             raise GitPushDenied('Push authorization is unavailable or expired. Retry niyan push.')
         _require_current_authorization(context, now=now)
@@ -551,7 +551,7 @@ def _accept_updates(*, context_id, dataset_id, updates, complete):
 
     now = timezone.now()
     with transaction.atomic():
-        context = GitPushContext.objects.select_for_update().select_related('dataset__namespace', 'user', 'access_token').filter(pk=context_id, dataset_id=dataset_id, validated_at__isnull=False).first()
+        context = GitPushContext.objects.select_for_update(of=('self',)).select_related('dataset__namespace', 'user', 'access_token').filter(pk=context_id, dataset_id=dataset_id, validated_at__isnull=False).first()
         if context is None:
             raise GitPushUnavailable('Repository policy is temporarily unavailable.')
         accepted_refs = []

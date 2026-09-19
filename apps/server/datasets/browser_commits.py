@@ -137,7 +137,7 @@ def publish_browser_draft(*, draft, user, message):
     if not message or not message.strip():
         raise BrowserDraftInvalid('A non-empty commit message is required.')
     with transaction.atomic():
-        locked = BrowserCommitDraft.objects.select_for_update().select_related('dataset__namespace', 'created_by').get(pk=draft.pk)
+        locked = BrowserCommitDraft.objects.select_for_update(of=('self',)).select_related('dataset__namespace', 'created_by').get(pk=draft.pk)
         _require_open_draft(locked)
         role = get_dataset_role(user=user, dataset=locked.dataset)
         if role is None or ROLE_LEVELS[role] < ROLE_LEVELS['contributor']:

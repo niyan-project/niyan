@@ -112,7 +112,7 @@ def update_group(*, group, updated_by, name=None, slug=None):
     """Update a group's mutable name or path component after owner authorization."""
 
     with transaction.atomic():
-        locked_group = Namespace.objects.select_for_update().select_related('parent').get(pk=group.pk, kind=Namespace.Kind.GROUP)
+        locked_group = Namespace.objects.select_for_update(of=('self',)).select_related('parent').get(pk=group.pk, kind=Namespace.Kind.GROUP)
         if not can_manage_group(user=updated_by, namespace=locked_group):
             raise PermissionDenied('You cannot update this group.')
         previous_path = locked_group.path
@@ -180,7 +180,7 @@ def update_group_membership(*, membership, role, updated_by):
     """Change a direct group membership while preserving a direct owner."""
 
     with transaction.atomic():
-        locked_membership = NamespaceMembership.objects.select_for_update().select_related('namespace', 'user').get(pk=membership.pk)
+        locked_membership = NamespaceMembership.objects.select_for_update(of=('self',)).select_related('namespace', 'user').get(pk=membership.pk)
         if not can_manage_group(user=updated_by, namespace=locked_membership.namespace):
             raise PermissionDenied('You cannot manage this group.')
         if locked_membership.role == NamespaceMembership.Role.OWNER and role != NamespaceMembership.Role.OWNER and not locked_membership.namespace.memberships.exclude(pk=locked_membership.pk).filter(role=NamespaceMembership.Role.OWNER).exists():
@@ -208,7 +208,7 @@ def delete_group_membership(*, membership, deleted_by):
     """Remove a direct group membership while preserving a direct owner."""
 
     with transaction.atomic():
-        locked_membership = NamespaceMembership.objects.select_for_update().select_related('namespace', 'user').get(pk=membership.pk)
+        locked_membership = NamespaceMembership.objects.select_for_update(of=('self',)).select_related('namespace', 'user').get(pk=membership.pk)
         if not can_manage_group(user=deleted_by, namespace=locked_membership.namespace):
             raise PermissionDenied('You cannot manage this group.')
         if locked_membership.role == NamespaceMembership.Role.OWNER and not locked_membership.namespace.memberships.exclude(pk=locked_membership.pk).filter(role=NamespaceMembership.Role.OWNER).exists():
