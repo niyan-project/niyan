@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from datasets.lfs_cleanup import LfsCleanupResult, cleanup_lfs_orphans
-from datasets.models import Dataset, LfsMultipartUpload, LfsObject
+from datasets.models import BrowserCommitChange, BrowserCommitDraft, Dataset, LfsMultipartUpload, LfsObject
 from datasets.object_storage import ObjectStoreError
 
 
@@ -93,6 +93,19 @@ class LfsCleanupTests(TestCase):
 
         self.assertEqual(result.failures, 1)
         self.assertTrue(LfsObject.objects.filter(pk=lfs_object.pk).exists())
+
+    def test_expired_drafts_release_unreferenced_lfs_objects_for_cleanup(self):
+        """Discard expired orchestration state before reclaiming its old orphan."""
+
+        lfs_object = self.create_object('g', state=LfsObject.State.AVAILABLE)
+        draft = BrowserCommitDraft.objects.create(dataset=self.dataset, created_by=self.dataset.created_by, target_branch='main', expires_at=self.now - timedelta(seconds=1))
+        BrowserCommitChange.objects.create(draft=draft, path='large.bin', operation=BrowserCommitChange.Operation.UPSERT, storage=BrowserCommitChange.Storage.LFS, size=lfs_object.size, lfs_object=lfs_object)
+
+        result = cleanup_lfs_orphans(object_store=self.store, now=self.now)
+
+        self.assertEqual(result.expired_drafts, 1)
+        self.assertFalse(BrowserCommitDraft.objects.filter(pk=draft.pk).exists())
+        self.assertFalse(LfsObject.objects.filter(pk=lfs_object.pk).exists())
 
     def test_one_shot_management_command_uses_same_reconciliation_service(self):
         """Provide explicit reconciliation without separate cron-only behavior."""

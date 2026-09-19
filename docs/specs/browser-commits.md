@@ -24,6 +24,8 @@ The web client applies the same default classification as `niyan add`: a regular
 
 Git LFS content uses the existing dataset-scoped direct-transfer protocol. The browser obtains short-lived signed actions after authorization and uploads bytes directly to S3-compatible storage. Draft state records only the expected Git LFS SHA-256 identifier, size, and verified server-side object record; it never stores a signed URL or storage credential.
 
+The S3-compatible deployment must allow the configured Niyān web origin to perform signed `PUT` requests and must expose `ETag` plus any provider checksum response headers through CORS. This is required for browser multipart completion; it does not make objects public.
+
 Ordinary Git content is limited to 10 MiB per staged file and may be sent through a bounded authenticated Django endpoint. Django streams it into the bare repository's object database, verifies the declared size, and records the resulting Git blob identifier without retaining a second copy in PostgreSQL. A client cannot force content above that bound into the Git upload endpoint.
 
 ## Commit Publication

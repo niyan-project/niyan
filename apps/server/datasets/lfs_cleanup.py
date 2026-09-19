@@ -6,7 +6,7 @@ from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from datasets.models import LfsMultipartUpload, LfsObject
+from datasets.models import BrowserCommitDraft, LfsMultipartUpload, LfsObject
 from datasets.object_storage import ObjectNotFound, ObjectStoreError, S3ObjectStore
 
 
@@ -17,6 +17,7 @@ class LfsCleanupResult:
     aborted_multipart_uploads: int = 0
     deleted_objects: int = 0
     failures: int = 0
+    expired_drafts: int = 0
 
 
 def cleanup_lfs_orphans(*, object_store=None, now=None, batch_size=100):
@@ -51,6 +52,14 @@ def cleanup_lfs_orphans(*, object_store=None, now=None, batch_size=100):
     deleted = 0
     failures = 0
 
+    expired_draft_ids = list(
+        BrowserCommitDraft.objects.filter(state=BrowserCommitDraft.State.OPEN, expires_at__lte=current_time)
+        .order_by('expires_at', 'id')
+        .values_list('id', flat=True)[:batch_size]
+    )
+    expired_drafts = BrowserCommitDraft.objects.filter(pk__in=expired_draft_ids, state=BrowserCommitDraft.State.OPEN, expires_at__lte=current_time).count()
+    BrowserCommitDraft.objects.filter(pk__in=expired_draft_ids, state=BrowserCommitDraft.State.OPEN, expires_at__lte=current_time).delete()
+
     # A failed post-receive hook must not let cleanup delete content that Git made reachable successfully.
     from datasets.git_push import reconcile_git_pushes
 
@@ -83,7 +92,7 @@ def cleanup_lfs_orphans(*, object_store=None, now=None, batch_size=100):
         except ObjectStoreError:
             failures += 1
 
-    return LfsCleanupResult(aborted_multipart_uploads=aborted, deleted_objects=deleted, failures=failures)
+    return LfsCleanupResult(aborted_multipart_uploads=aborted, deleted_objects=deleted, failures=failures, expired_drafts=expired_drafts)
 
 
 def _abort_expired_session(*, store, session_id, lfs_object_id, current_time):

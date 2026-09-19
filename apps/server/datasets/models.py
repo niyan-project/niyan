@@ -250,6 +250,95 @@ class LfsObject(models.Model):
         return f'{self.dataset_id}:{self.oid}'
 
 
+class BrowserCommitDraft(models.Model):
+    """Hold creator-private, temporary orchestration state for one browser commit."""
+
+    class State(models.TextChoices):
+        """Describe whether a draft may still accept changes or publish."""
+
+        OPEN = 'open', 'Open'
+        COMMITTED = 'committed', 'Committed'
+        DISCARDED = 'discarded', 'Discarded'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE, related_name='browser_commit_drafts')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='browser_commit_drafts')
+    target_branch = models.CharField(max_length=255)
+    base_commit = models.CharField(max_length=64, blank=True)
+    state = models.CharField(max_length=10, choices=State.choices, default=State.OPEN)
+    committed_oid = models.CharField(max_length=64, blank=True)
+    expires_at = models.DateTimeField(editable=False)
+    committed_at = models.DateTimeField(null=True, blank=True, editable=False)
+    discarded_at = models.DateTimeField(null=True, blank=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Keep state-specific terminal metadata internally consistent."""
+
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(state='open', committed_oid='', committed_at__isnull=True, discarded_at__isnull=True)
+                    | Q(state='committed', committed_oid__gt='', committed_at__isnull=False, discarded_at__isnull=True)
+                    | Q(state='discarded', committed_oid='', committed_at__isnull=True, discarded_at__isnull=False)
+                ),
+                name='browser_draft_state_consistent',
+            ),
+        ]
+
+    def __str__(self):
+        """Return the opaque draft identity and target branch."""
+
+        return f'{self.id}:{self.target_branch}'
+
+
+class BrowserCommitChange(models.Model):
+    """Record one final staged path operation within a browser commit draft."""
+
+    class Operation(models.TextChoices):
+        """Limit browser tree mutations to regular-file replacement and deletion."""
+
+        UPSERT = 'upsert', 'Add or replace'
+        DELETE = 'delete', 'Delete'
+
+    class Storage(models.TextChoices):
+        """Describe where an upsert's logical content is stored."""
+
+        GIT = 'git', 'Git'
+        LFS = 'lfs', 'Git LFS'
+
+    draft = models.ForeignKey(BrowserCommitDraft, on_delete=models.CASCADE, related_name='changes')
+    path = models.CharField(max_length=4096)
+    operation = models.CharField(max_length=6, choices=Operation.choices)
+    storage = models.CharField(max_length=3, choices=Storage.choices, blank=True)
+    size = models.PositiveBigIntegerField(null=True, blank=True)
+    git_blob_oid = models.CharField(max_length=64, blank=True)
+    lfs_object = models.ForeignKey(LfsObject, null=True, blank=True, on_delete=models.PROTECT, related_name='browser_draft_changes')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Keep one current operation per path and require storage-specific identity."""
+
+        constraints = [
+            models.UniqueConstraint(fields=['draft', 'path'], name='unique_browser_draft_path'),
+            models.CheckConstraint(
+                condition=(
+                    Q(operation='delete', storage='', size__isnull=True, git_blob_oid='', lfs_object__isnull=True)
+                    | Q(operation='upsert', storage='git', size__isnull=False, git_blob_oid__gt='', lfs_object__isnull=True)
+                    | Q(operation='upsert', storage='lfs', size__isnull=False, git_blob_oid='', lfs_object__isnull=False)
+                ),
+                name='browser_draft_change_storage_consistent',
+            ),
+        ]
+
+    def __str__(self):
+        """Return one concise staged path operation."""
+
+        return f'{self.draft_id}:{self.operation}:{self.path}'
+
+
 class LfsMultipartUpload(models.Model):
     """Persist one opaque provider multipart session for a Git LFS object."""
 

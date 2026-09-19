@@ -3,6 +3,7 @@ from ninja.errors import AuthenticationError, AuthorizationError, Throttled, Val
 
 from accounts.api import router as authentication_router
 from datasets.api import router as datasets_router
+from datasets.browser_commit_api import router as browser_commit_router
 from datasets.lfs_api import router as lfs_router
 from datasets.repository_api import router as repository_router
 from namespaces.api import router as namespaces_router
@@ -11,6 +12,7 @@ from namespaces.api import router as namespaces_router
 api = NinjaAPI(title='Niyān API', version='1.0.0', urls_namespace='api-v1')
 api.add_router('/auth', authentication_router)
 api.add_router('/datasets', datasets_router)
+api.add_router('/datasets', browser_commit_router)
 api.add_router('/datasets', repository_router)
 api.add_router('/datasets', lfs_router)
 api.add_router('/namespaces', namespaces_router)

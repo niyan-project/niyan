@@ -31,7 +31,7 @@ class Command(BaseCommand):
         while True:
             result = cleanup_lfs_orphans(batch_size=batch_size)
             self.stdout.write(
-                f'aborted_multipart_uploads={result.aborted_multipart_uploads} deleted_objects={result.deleted_objects} failures={result.failures}'
+                f'expired_drafts={result.expired_drafts} aborted_multipart_uploads={result.aborted_multipart_uploads} deleted_objects={result.deleted_objects} failures={result.failures}'
             )
             if options['once']:
                 return

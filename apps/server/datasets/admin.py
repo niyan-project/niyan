@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from datasets.models import Dataset, DatasetGrant, GitPushContext, GitPushLfsLease, GitPushRef, LfsMultipartUpload, LfsObject, ProtectedRefRule
+from datasets.models import BrowserCommitChange, BrowserCommitDraft, Dataset, DatasetGrant, GitPushContext, GitPushLfsLease, GitPushRef, LfsMultipartUpload, LfsObject, ProtectedRefRule
 
 
 class DatasetGrantInline(admin.TabularInline):
@@ -100,6 +100,31 @@ class ReadOnlyLifecycleAdmin(admin.ModelAdmin):
         """Leave lifecycle retention to maintenance services."""
 
         return False
+
+
+class BrowserCommitChangeInline(admin.TabularInline):
+    """Show creator-staged operations without allowing administrative mutation."""
+
+    model = BrowserCommitChange
+    extra = 0
+    can_delete = False
+    readonly_fields = ('path', 'operation', 'storage', 'size', 'git_blob_oid', 'lfs_object', 'created_at', 'updated_at')
+
+    def has_add_permission(self, request, obj=None):
+        """Require draft changes to pass through browser-commit services."""
+
+        return False
+
+
+@admin.register(BrowserCommitDraft)
+class BrowserCommitDraftAdmin(ReadOnlyLifecycleAdmin):
+    """Expose non-secret browser draft lifecycle for operations."""
+
+    list_display = ('id', 'dataset', 'created_by', 'target_branch', 'state', 'expires_at', 'committed_at')
+    list_filter = ('state',)
+    search_fields = ('id', 'dataset__slug', 'dataset__name', 'created_by__username', 'target_branch', 'base_commit', 'committed_oid')
+    list_select_related = ('dataset__namespace', 'created_by')
+    inlines = (BrowserCommitChangeInline,)
 
 
 @admin.register(GitPushContext)

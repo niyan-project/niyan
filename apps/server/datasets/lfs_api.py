@@ -4,7 +4,7 @@ from uuid import UUID
 
 from ninja import Field, Router, Schema, Status
 
-from accounts.authentication import access_token_bearer, require_access
+from accounts.authentication import require_access, session_or_access_token
 from datasets.lfs_transfers import LfsIntegrityError, LfsMultipartExpired, LfsTransferUnavailable, abort_multipart_upload, complete_multipart_upload, initiate_multipart_upload, issue_multipart_part_action
 from datasets.models import Dataset, LfsMultipartUpload, LfsObject
 from datasets.object_storage import CompletedPart, ObjectStoreError
@@ -75,7 +75,7 @@ class LfsControlErrorResponse(Schema):
     detail: str
 
 
-router = Router(tags=['lfs'], auth=access_token_bearer)
+router = Router(tags=['lfs'], auth=session_or_access_token)
 
 
 @router.post('/{dataset_id}/lfs/objects/{oid}/multipart', response={200: MultipartSessionResponse, 401: LfsControlErrorResponse, 403: LfsControlErrorResponse, 404: LfsControlErrorResponse, 409: LfsControlErrorResponse, 422: LfsControlErrorResponse, 503: LfsControlErrorResponse})
