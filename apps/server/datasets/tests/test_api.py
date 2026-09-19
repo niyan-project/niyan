@@ -9,7 +9,7 @@ from django.utils.dateparse import parse_datetime
 
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
-from datasets.models import Dataset, DatasetGrant
+from datasets.models import Dataset, DatasetGrant, ProtectedRefRule
 from datasets.object_storage import ObjectStoreError
 from datasets.repositories import RepositoryDeletionError
 from namespaces.models import Namespace, NamespaceMembership
@@ -340,6 +340,56 @@ class DatasetApiTests(TestCase):
         self.assertEqual(hidden_group_response.status_code, 404)
         self.assertEqual(inexact_user.json()['code'], 'principal_not_found')
         self.assertEqual(hidden_group_response.json()['code'], 'principal_not_found')
+
+    def test_protected_ref_rules_default_to_empty_and_support_crud(self):
+        """Preserve stock Git defaults until a maintainer explicitly adds a rule."""
+
+        dataset_id = self.post_dataset().json()['id']
+        list_response = self.client.get(f'/api/v1/datasets/{dataset_id}/protected-refs')
+        create_response = self.client.post(
+            f'/api/v1/datasets/{dataset_id}/protected-refs',
+            {'kind': 'branch', 'pattern': 'release/*', 'minimum_role': 'maintainer', 'deletion_minimum_role': 'owner'},
+            content_type='application/json',
+        )
+        rule_id = create_response.json()['id']
+        duplicate_response = self.client.post(
+            f'/api/v1/datasets/{dataset_id}/protected-refs',
+            {'kind': 'branch', 'pattern': 'release/*', 'minimum_role': 'owner', 'deletion_minimum_role': 'owner'},
+            content_type='application/json',
+        )
+        update_response = self.client.patch(f'/api/v1/datasets/{dataset_id}/protected-refs/{rule_id}', {'pattern': 'stable/*'}, content_type='application/json')
+        delete_response = self.client.delete(f'/api/v1/datasets/{dataset_id}/protected-refs/{rule_id}')
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json(), {'count': 0, 'items': []})
+        self.assertEqual(create_response.status_code, 201, create_response.content)
+        self.assertEqual(create_response.json()['pattern'], 'release/*')
+        self.assertEqual(duplicate_response.status_code, 409)
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()['pattern'], 'stable/*')
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertFalse(ProtectedRefRule.objects.exists())
+
+    def test_protected_ref_rules_validate_patterns_and_hide_configuration(self):
+        """Reject unsafe patterns and keep administrative policy from contributors."""
+
+        dataset_id = self.post_dataset().json()['id']
+        invalid_response = self.client.post(
+            f'/api/v1/datasets/{dataset_id}/protected-refs',
+            {'kind': 'branch', 'pattern': 'refs/heads/main', 'minimum_role': 'maintainer', 'deletion_minimum_role': 'owner'},
+            content_type='application/json',
+        )
+        collaborator = User.objects.create_user(username='collaborator')
+        grant = DatasetGrant.objects.create(dataset_id=dataset_id, user=collaborator, role=NamespaceMembership.Role.CONTRIBUTOR)
+        self.client.force_login(collaborator)
+        hidden_response = self.client.get(f'/api/v1/datasets/{dataset_id}/protected-refs')
+        grant.role = NamespaceMembership.Role.MAINTAINER
+        grant.save(update_fields=['role', 'updated_at'])
+        maintainer_response = self.client.get(f'/api/v1/datasets/{dataset_id}/protected-refs')
+
+        self.assertEqual(invalid_response.status_code, 422)
+        self.assertEqual(hidden_response.status_code, 404)
+        self.assertEqual(maintainer_response.status_code, 200)
 
     def test_delete_dataset_permanently_removes_record_and_repository(self):
         """Remove both control-plane identity and UUID-addressed Git storage."""

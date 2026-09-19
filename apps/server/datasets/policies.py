@@ -1,3 +1,5 @@
+from fnmatch import fnmatchcase
+
 from django.db.models import Q
 
 from namespaces.models import Namespace, NamespaceMembership
@@ -129,6 +131,19 @@ def can_manage_dataset_grants(*, user, dataset):
     """Return whether a user may administer dataset principals."""
 
     return _at_least(get_dataset_role(user=user, dataset=dataset), NamespaceMembership.Role.OWNER)
+
+
+def can_manage_protected_refs(*, user, dataset):
+    """Return whether a user may configure stricter ref-mutation rules."""
+
+    return _at_least(get_dataset_role(user=user, dataset=dataset), NamespaceMembership.Role.MAINTAINER)
+
+
+def required_protected_ref_role(*, rules, kind, short_name, deleting):
+    """Return the strictest role required by matching optional ref rules."""
+
+    matching_roles = [rule.deletion_minimum_role if deleting else rule.minimum_role for rule in rules if rule.kind == kind and fnmatchcase(short_name, rule.pattern)]
+    return max(matching_roles, key=ROLE_LEVELS.__getitem__, default=None)
 
 
 def can_delete_dataset(*, user, dataset):

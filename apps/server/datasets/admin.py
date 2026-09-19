@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from datasets.models import Dataset, DatasetGrant, GitPushContext, GitPushLfsLease, GitPushRef, LfsMultipartUpload, LfsObject
+from datasets.models import Dataset, DatasetGrant, GitPushContext, GitPushLfsLease, GitPushRef, LfsMultipartUpload, LfsObject, ProtectedRefRule
 
 
 class DatasetGrantInline(admin.TabularInline):
@@ -29,6 +29,16 @@ class DatasetGrantAdmin(admin.ModelAdmin):
     search_fields = ('dataset__name', 'dataset__slug', 'user__username', 'group_namespace__name', 'group_namespace__slug')
     autocomplete_fields = ('dataset', 'user', 'group_namespace')
     list_select_related = ('dataset__namespace', 'user', 'group_namespace')
+
+
+@admin.register(ProtectedRefRule)
+class ProtectedRefRuleAdmin(admin.ModelAdmin):
+    """Expose optional branch and tag mutation policy to administrators."""
+
+    list_display = ('pattern', 'kind', 'dataset', 'minimum_role', 'deletion_minimum_role', 'updated_at')
+    list_filter = ('kind', 'minimum_role', 'deletion_minimum_role')
+    search_fields = ('pattern', 'dataset__slug', 'dataset__name')
+    list_select_related = ('dataset__namespace',)
 
 
 @admin.register(LfsObject)

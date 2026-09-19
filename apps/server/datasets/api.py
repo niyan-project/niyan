@@ -12,11 +12,11 @@ from pydantic import model_validator
 
 from accounts.authentication import get_access_token, require_access, session_or_access_token
 from accounts.models import AccessToken
-from datasets.models import DatasetGrant
+from datasets.models import DatasetGrant, ProtectedRefRule
 from datasets.policies import get_dataset_role
 from datasets.repositories import RepositoryDeletionError, RepositoryProvisioningError
-from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_visible_dataset, list_visible_datasets, list_visible_namespace_datasets, resolve_visible_dataset_path
-from datasets.services import DatasetObjectDeletionError, DatasetPathConflict, create_dataset, create_dataset_grant, delete_dataset, delete_dataset_grant, update_dataset, update_dataset_grant
+from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_protected_ref_manageable_dataset, get_visible_dataset, list_visible_datasets, list_visible_namespace_datasets, resolve_visible_dataset_path
+from datasets.services import DatasetObjectDeletionError, DatasetPathConflict, create_dataset, create_dataset_grant, create_protected_ref_rule, delete_dataset, delete_dataset_grant, delete_protected_ref_rule, update_dataset, update_dataset_grant, update_protected_ref_rule
 from namespaces.models import Namespace
 from namespaces.selectors import get_visible_namespace_by_path
 
@@ -151,6 +151,52 @@ class DatasetGrantListResponse(Schema):
     items: list[DatasetGrantResponse]
 
 
+class ProtectedRefRuleInput(Schema):
+    """Describe a complete protected-ref rule."""
+
+    kind: Literal['branch', 'tag']
+    pattern: str = Field(min_length=1, max_length=255)
+    minimum_role: Literal['contributor', 'maintainer', 'owner'] = 'contributor'
+    deletion_minimum_role: Literal['contributor', 'maintainer', 'owner'] = 'contributor'
+
+
+class ProtectedRefRuleUpdateInput(Schema):
+    """Describe selected protected-ref rule changes."""
+
+    kind: Literal['branch', 'tag'] | None = None
+    pattern: str | None = Field(default=None, min_length=1, max_length=255)
+    minimum_role: Literal['contributor', 'maintainer', 'owner'] | None = None
+    deletion_minimum_role: Literal['contributor', 'maintainer', 'owner'] | None = None
+
+    @model_validator(mode='after')
+    def require_non_null_change(self) -> Self:
+        """Reject empty updates and explicit null values."""
+
+        if not self.model_fields_set or any(getattr(self, field_name) is None for field_name in self.model_fields_set):
+            raise ValueError('At least one non-null field is required.')
+        return self
+
+
+class ProtectedRefRuleResponse(Schema):
+    """Expose one immutable protected-ref rule identity and its policy."""
+
+    id: UUID
+    dataset_id: UUID
+    kind: str
+    pattern: str
+    minimum_role: str
+    deletion_minimum_role: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProtectedRefRuleListResponse(Schema):
+    """Return every configured rule for one manageable dataset."""
+
+    count: int
+    items: list[ProtectedRefRuleResponse]
+
+
 router = Router(tags=['datasets'], auth=session_or_access_token)
 
 
@@ -207,6 +253,21 @@ def serialize_dataset_grant(grant):
         'role': grant.role,
         'created_at': grant.created_at,
         'updated_at': grant.updated_at,
+    }
+
+
+def serialize_protected_ref_rule(rule):
+    """Convert one protected-ref rule to its public representation."""
+
+    return {
+        'id': rule.id,
+        'dataset_id': rule.dataset_id,
+        'kind': rule.kind,
+        'pattern': rule.pattern,
+        'minimum_role': rule.minimum_role,
+        'deletion_minimum_role': rule.deletion_minimum_role,
+        'created_at': rule.created_at,
+        'updated_at': rule.updated_at,
     }
 
 
@@ -467,4 +528,75 @@ def delete_dataset_grant_endpoint(request, dataset_id: UUID, grant_id: int):
         delete_dataset_grant(grant=grant, deleted_by=request.auth)
     except PermissionDenied:
         return Status(404, {'code': 'grant_not_found', 'detail': 'The requested dataset grant does not exist.'})
+    return Status(204, None)
+
+
+@router.get('/{dataset_id}/protected-refs', response={200: ProtectedRefRuleListResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse})
+def list_protected_ref_rules_endpoint(request, dataset_id: UUID):
+    """List optional protected-ref rules for a maintainer-managed dataset."""
+
+    require_access(request=request, scope='read_api', dataset_id=dataset_id)
+    dataset = get_protected_ref_manageable_dataset(dataset_id=dataset_id, user=request.auth)
+    if dataset is None:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    rules = dataset.protected_ref_rules.order_by('kind', 'pattern', 'id')
+    return {'count': rules.count(), 'items': [serialize_protected_ref_rule(rule) for rule in rules]}
+
+
+@router.post('/{dataset_id}/protected-refs', response={201: ProtectedRefRuleResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse})
+def create_protected_ref_rule_endpoint(request, dataset_id: UUID, payload: ProtectedRefRuleInput):
+    """Create one optional branch or tag restriction."""
+
+    require_access(request=request, scope='api', dataset_id=dataset_id)
+    dataset = get_protected_ref_manageable_dataset(dataset_id=dataset_id, user=request.auth)
+    if dataset is None:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    try:
+        rule = create_protected_ref_rule(dataset=dataset, kind=payload.kind, pattern=payload.pattern, minimum_role=payload.minimum_role, deletion_minimum_role=payload.deletion_minimum_role, created_by=request.auth)
+    except PermissionDenied:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    except IntegrityError:
+        return Status(409, {'code': 'protected_ref_conflict', 'detail': 'That protected-ref rule already exists.'})
+    except ValidationError:
+        return Status(422, {'code': 'validation_error', 'detail': 'The protected-ref rule is invalid.'})
+    return Status(201, serialize_protected_ref_rule(rule))
+
+
+@router.patch('/{dataset_id}/protected-refs/{rule_id}', response={200: ProtectedRefRuleResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse})
+def update_protected_ref_rule_endpoint(request, dataset_id: UUID, rule_id: UUID, payload: ProtectedRefRuleUpdateInput):
+    """Update one protected-ref rule by immutable identity."""
+
+    require_access(request=request, scope='api', dataset_id=dataset_id)
+    dataset = get_protected_ref_manageable_dataset(dataset_id=dataset_id, user=request.auth)
+    if dataset is None:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    rule = ProtectedRefRule.objects.filter(pk=rule_id, dataset=dataset).first()
+    if rule is None:
+        return Status(404, {'code': 'protected_ref_not_found', 'detail': 'The requested protected-ref rule does not exist.'})
+    try:
+        rule = update_protected_ref_rule(rule=rule, updated_by=request.auth, **payload.model_dump(exclude_unset=True))
+    except PermissionDenied:
+        return Status(404, {'code': 'protected_ref_not_found', 'detail': 'The requested protected-ref rule does not exist.'})
+    except IntegrityError:
+        return Status(409, {'code': 'protected_ref_conflict', 'detail': 'That protected-ref rule already exists.'})
+    except ValidationError:
+        return Status(422, {'code': 'validation_error', 'detail': 'The protected-ref rule is invalid.'})
+    return serialize_protected_ref_rule(rule)
+
+
+@router.delete('/{dataset_id}/protected-refs/{rule_id}', response={204: None, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse})
+def delete_protected_ref_rule_endpoint(request, dataset_id: UUID, rule_id: UUID):
+    """Delete one optional protected-ref rule."""
+
+    require_access(request=request, scope='api', dataset_id=dataset_id)
+    dataset = get_protected_ref_manageable_dataset(dataset_id=dataset_id, user=request.auth)
+    if dataset is None:
+        return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+    rule = ProtectedRefRule.objects.filter(pk=rule_id, dataset=dataset).first()
+    if rule is None:
+        return Status(404, {'code': 'protected_ref_not_found', 'detail': 'The requested protected-ref rule does not exist.'})
+    try:
+        delete_protected_ref_rule(rule=rule, deleted_by=request.auth)
+    except PermissionDenied:
+        return Status(404, {'code': 'protected_ref_not_found', 'detail': 'The requested protected-ref rule does not exist.'})
     return Status(204, None)

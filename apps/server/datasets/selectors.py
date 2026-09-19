@@ -1,5 +1,5 @@
 from datasets.models import Dataset
-from datasets.policies import can_delete_dataset, can_manage_dataset_grants, can_read_dataset, can_view_namespace
+from datasets.policies import can_delete_dataset, can_manage_dataset_grants, can_manage_protected_refs, can_read_dataset, can_view_namespace
 from namespaces.models import Namespace
 
 
@@ -121,6 +121,15 @@ def get_grant_manageable_dataset(*, dataset_id, user):
 
     dataset = Dataset.objects.select_related('namespace__parent').filter(pk=dataset_id, deletion_started_at__isnull=True).first()
     if dataset is None or not can_manage_dataset_grants(user=user, dataset=dataset):
+        return None
+    return dataset
+
+
+def get_protected_ref_manageable_dataset(*, dataset_id, user):
+    """Return a dataset only when the user may configure protected refs."""
+
+    dataset = Dataset.objects.select_related('namespace__parent').filter(pk=dataset_id, deletion_started_at__isnull=True).first()
+    if dataset is None or not can_manage_protected_refs(user=user, dataset=dataset):
         return None
     return dataset
 

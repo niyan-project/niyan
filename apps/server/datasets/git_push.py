@@ -11,8 +11,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.authentication import access_token_permits
-from datasets.models import Dataset, GitPushContext, GitPushLfsLease, GitPushRef, LfsObject
-from datasets.policies import ROLE_LEVELS, get_dataset_role
+from datasets.models import Dataset, GitPushContext, GitPushLfsLease, GitPushRef, LfsObject, ProtectedRefRule
+from datasets.policies import ROLE_LEVELS, get_dataset_role, required_protected_ref_role
 from datasets.repositories import GitRepositoryStore, RepositoryReadError
 from namespaces.models import NamespaceMembership
 
@@ -95,7 +95,8 @@ def enforce_pre_receive(*, context_id, dataset_id, lines, repository_path=None):
     context = _consume_context(context_id=context_id, dataset_id=normalized_dataset_id)
     oid_length = _object_id_length(repository)
     updates = _parse_updates(lines, oid_length=oid_length)
-    _enforce_ref_policy(repository=repository, updates=updates, role=context.role, oid_length=oid_length)
+    rules = list(ProtectedRefRule.objects.filter(dataset_id=normalized_dataset_id).only('kind', 'pattern', 'minimum_role', 'deletion_minimum_role'))
+    _enforce_ref_policy(repository=repository, updates=updates, role=context.role, oid_length=oid_length, rules=rules)
     pointers = _find_new_lfs_pointers(repository=repository, updates=updates)
     _record_validation(context_id=context.id, updates=updates, pointers=pointers)
     return updates
@@ -298,7 +299,7 @@ def _valid_oid(value, length):
     return len(value) == length and HEX_OID.fullmatch(value) is not None
 
 
-def _enforce_ref_policy(*, repository, updates, role, oid_length):
+def _enforce_ref_policy(*, repository, updates, role, oid_length, rules=()):
     """Apply the accepted namespace, type, role, deletion, and fast-forward rules."""
 
     zero = '0' * oid_length
@@ -309,25 +310,44 @@ def _enforce_ref_policy(*, repository, updates, role, oid_length):
         created = update.old_oid == zero
         deleted = update.new_oid == zero
         if update.ref_name.startswith('refs/heads/'):
+            kind = ProtectedRefRule.Kind.BRANCH
+            short_name = update.ref_name.removeprefix('refs/heads/')
             if deleted:
                 if update.ref_name == 'refs/heads/main':
                     raise GitPushDenied('The default branch cannot be deleted.')
+                _enforce_protected_ref_rules(rules=rules, kind=kind, short_name=short_name, role=role, deleting=True)
                 continue
             if _git_output(repository, ['cat-file', '-t', update.new_oid]) != 'commit':
                 raise GitPushDenied(f'{update.ref_name} must point to a commit.')
             if not created and _run_git(repository, ['merge-base', '--is-ancestor', update.old_oid, update.new_oid]).returncode != 0:
                 raise GitPushDenied(f'{update.ref_name} is not a fast-forward update. Pull and resolve the divergence before retrying.')
+            _enforce_protected_ref_rules(rules=rules, kind=kind, short_name=short_name, role=role, deleting=False)
         elif update.ref_name.startswith('refs/tags/'):
+            kind = ProtectedRefRule.Kind.TAG
+            short_name = update.ref_name.removeprefix('refs/tags/')
             if deleted:
                 if ROLE_LEVELS[role] < ROLE_LEVELS[NamespaceMembership.Role.MAINTAINER]:
                     raise GitPushDenied(f'{update.ref_name} may only be deleted by a maintainer or owner.')
+                _enforce_protected_ref_rules(rules=rules, kind=kind, short_name=short_name, role=role, deleting=True)
                 continue
             if not created:
                 raise GitPushDenied(f'{update.ref_name} already exists and tags cannot be updated in place.')
             if _run_git(repository, ['rev-parse', '--verify', '--quiet', f'{update.new_oid}^{{commit}}']).returncode != 0:
                 raise GitPushDenied(f'{update.ref_name} must ultimately point to a commit.')
+            _enforce_protected_ref_rules(rules=rules, kind=kind, short_name=short_name, role=role, deleting=False)
         else:
             raise GitPushDenied(f'{update.ref_name} is outside the supported branch and tag namespaces.')
+
+
+def _enforce_protected_ref_rules(*, rules, kind, short_name, role, deleting):
+    """Apply the strictest matching optional rule after immutable baseline policy."""
+
+    required_role = required_protected_ref_role(rules=rules, kind=kind, short_name=short_name, deleting=deleting)
+    if required_role is None:
+        return
+    if ROLE_LEVELS[role] < ROLE_LEVELS[required_role]:
+        operation = 'deletion' if deleting else 'creation or update'
+        raise GitPushDenied(f'{kind} {short_name} requires the {required_role} role for {operation}.')
 
 
 def _find_new_lfs_pointers(*, repository, updates):

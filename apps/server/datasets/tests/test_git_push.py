@@ -9,7 +9,7 @@ from django.utils import timezone
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
 from datasets.git_push import GitPushDenied, create_push_context, enforce_pre_receive, parse_lfs_pointer, reconcile_git_pushes, record_post_receive
-from datasets.models import DatasetGrant, GitPushLfsLease, GitPushRef, LfsObject
+from datasets.models import DatasetGrant, GitPushLfsLease, GitPushRef, LfsObject, ProtectedRefRule
 from datasets.services import create_dataset
 from namespaces.models import NamespaceMembership
 
@@ -240,6 +240,38 @@ class GitPushPolicyTests(TestCase):
             lines=[f'{commit} {zero} refs/tags/v1\n'],
             repository_path=self.repository,
         )
+
+    def test_strictest_matching_protected_ref_rule_restricts_optional_policy(self):
+        """Apply wildcard rules without changing unprotected Git behavior."""
+
+        commit = self._commit('data.txt', 'initial\n', 'Initial')
+        self._import(commit)
+        collaborator = User.objects.create_user(username='collaborator')
+        grant = DatasetGrant.objects.create(dataset=self.dataset, user=collaborator, role=NamespaceMembership.Role.CONTRIBUTOR)
+        token, _ = create_access_token(user=collaborator, name='Contributor push', scopes=['write_repository'], origin=AccessToken.Origin.CLI)
+        ProtectedRefRule.objects.create(dataset=self.dataset, kind=ProtectedRefRule.Kind.BRANCH, pattern='release/*', minimum_role=NamespaceMembership.Role.MAINTAINER, deletion_minimum_role=NamespaceMembership.Role.OWNER)
+        ProtectedRefRule.objects.create(dataset=self.dataset, kind=ProtectedRefRule.Kind.BRANCH, pattern='release/v1', minimum_role=NamespaceMembership.Role.OWNER, deletion_minimum_role=NamespaceMembership.Role.OWNER)
+        zero = '0' * 40
+
+        contributor_context = create_push_context(dataset=self.dataset, access_token=token)
+        with self.assertRaisesRegex(GitPushDenied, 'maintainer'):
+            enforce_pre_receive(context_id=contributor_context.id, dataset_id=self.dataset.id, lines=[f'{zero} {commit} refs/heads/release/v2\n'], repository_path=self.repository)
+
+        grant.role = NamespaceMembership.Role.MAINTAINER
+        grant.save(update_fields=['role', 'updated_at'])
+        maintainer_context = create_push_context(dataset=self.dataset, access_token=token)
+        enforce_pre_receive(context_id=maintainer_context.id, dataset_id=self.dataset.id, lines=[f'{zero} {commit} refs/heads/release/v2\n'], repository_path=self.repository)
+        strict_context = create_push_context(dataset=self.dataset, access_token=token)
+        with self.assertRaisesRegex(GitPushDenied, 'owner'):
+            enforce_pre_receive(context_id=strict_context.id, dataset_id=self.dataset.id, lines=[f'{zero} {commit} refs/heads/release/v1\n'], repository_path=self.repository)
+
+        self._git('--git-dir', str(self.repository), 'update-ref', 'refs/heads/release/v2', commit)
+        deletion_context = create_push_context(dataset=self.dataset, access_token=token)
+        with self.assertRaisesRegex(GitPushDenied, 'owner'):
+            enforce_pre_receive(context_id=deletion_context.id, dataset_id=self.dataset.id, lines=[f'{commit} {zero} refs/heads/release/v2\n'], repository_path=self.repository)
+
+        owner_context = create_push_context(dataset=self.dataset, access_token=self.access_token)
+        enforce_pre_receive(context_id=owner_context.id, dataset_id=self.dataset.id, lines=[f'{commit} {zero} refs/heads/release/v2\n'], repository_path=self.repository)
 
     def test_context_rechecks_token_state_before_policy(self):
         """Reject a token revoked after receive-pack authorization but before the hook."""

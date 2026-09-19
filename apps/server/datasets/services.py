@@ -4,9 +4,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.validators import normalize_path_slug
-from datasets.models import Dataset, DatasetGrant
+from datasets.models import Dataset, DatasetGrant, ProtectedRefRule
 from datasets.object_storage import ObjectStoreError, S3ObjectStore
-from datasets.policies import can_create_dataset, can_delete_dataset, can_manage_dataset_grants, can_update_dataset
+from datasets.policies import can_create_dataset, can_delete_dataset, can_manage_dataset_grants, can_manage_protected_refs, can_update_dataset
 from datasets.repositories import GitRepositoryStore
 from namespaces.models import Namespace
 
@@ -279,3 +279,41 @@ def delete_dataset_grant(*, grant, deleted_by):
         if not can_manage_dataset_grants(user=deleted_by, dataset=locked_grant.dataset):
             raise PermissionDenied('You cannot manage grants for this dataset.')
         locked_grant.delete()
+
+
+def create_protected_ref_rule(*, dataset, kind, pattern, minimum_role, deletion_minimum_role, created_by):
+    """Create one stricter branch or tag mutation rule."""
+
+    with transaction.atomic():
+        locked_dataset = Dataset.objects.select_for_update().select_related('namespace__parent').get(pk=dataset.pk)
+        if not can_manage_protected_refs(user=created_by, dataset=locked_dataset):
+            raise PermissionDenied('You cannot manage protected refs for this dataset.')
+        rule = ProtectedRefRule(dataset=locked_dataset, kind=kind, pattern=pattern, minimum_role=minimum_role, deletion_minimum_role=deletion_minimum_role)
+        rule.full_clean(validate_constraints=False)
+        rule.save()
+        return rule
+
+
+def update_protected_ref_rule(*, rule, updated_by, kind=None, pattern=None, minimum_role=None, deletion_minimum_role=None):
+    """Update selected fields of one protected-ref rule."""
+
+    with transaction.atomic():
+        locked_rule = ProtectedRefRule.objects.select_for_update().select_related('dataset__namespace__parent').get(pk=rule.pk)
+        if not can_manage_protected_refs(user=updated_by, dataset=locked_rule.dataset):
+            raise PermissionDenied('You cannot manage protected refs for this dataset.')
+        for field_name, value in {'kind': kind, 'pattern': pattern, 'minimum_role': minimum_role, 'deletion_minimum_role': deletion_minimum_role}.items():
+            if value is not None:
+                setattr(locked_rule, field_name, value)
+        locked_rule.full_clean(validate_constraints=False)
+        locked_rule.save()
+        return locked_rule
+
+
+def delete_protected_ref_rule(*, rule, deleted_by):
+    """Delete one protected-ref rule after rechecking current authority."""
+
+    with transaction.atomic():
+        locked_rule = ProtectedRefRule.objects.select_for_update().select_related('dataset__namespace__parent').get(pk=rule.pk)
+        if not can_manage_protected_refs(user=deleted_by, dataset=locked_rule.dataset):
+            raise PermissionDenied('You cannot manage protected refs for this dataset.')
+        locked_rule.delete()

@@ -117,6 +117,75 @@ class DatasetGrant(models.Model):
         return f'{self.principal_label} as {self.role} on {self.dataset.path}'
 
 
+class ProtectedRefRule(models.Model):
+    """Require elevated roles for matching branch or tag mutations."""
+
+    class Kind(models.TextChoices):
+        """Limit configurable policy to Git's public branch and tag namespaces."""
+
+        BRANCH = 'branch', 'Branch'
+        TAG = 'tag', 'Tag'
+
+    MANAGED_ROLE_CHOICES = [
+        (NamespaceMembership.Role.CONTRIBUTOR, 'Contributor'),
+        (NamespaceMembership.Role.MAINTAINER, 'Maintainer'),
+        (NamespaceMembership.Role.OWNER, 'Owner'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE, related_name='protected_ref_rules')
+    kind = models.CharField(max_length=6, choices=Kind.choices)
+    pattern = models.CharField(max_length=255)
+    minimum_role = models.CharField(max_length=16, choices=MANAGED_ROLE_CHOICES, default=NamespaceMembership.Role.CONTRIBUTOR)
+    deletion_minimum_role = models.CharField(max_length=16, choices=MANAGED_ROLE_CHOICES, default=NamespaceMembership.Role.CONTRIBUTOR)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Keep one unambiguous rule for each dataset, ref kind, and pattern."""
+
+        constraints = [
+            models.UniqueConstraint(fields=['dataset', 'kind', 'pattern'], name='unique_protected_ref_rule'),
+        ]
+
+    def clean(self):
+        """Reject patterns that cannot safely describe supported short ref names."""
+
+        super().clean()
+        if not self.pattern or self.pattern != self.pattern.strip() or self.pattern.startswith('refs/'):
+            raise ValidationError({'pattern': 'Use a non-empty short branch or tag pattern without a refs/ prefix.'})
+        if self.pattern == '@' or self.pattern.startswith('/') or self.pattern.endswith('/') or self.pattern.endswith('.'):
+            raise ValidationError({'pattern': 'Use a valid short branch or tag pattern.'})
+        if any(character in self.pattern for character in ('\\', ' ', '~', '^', ':')) or any(ord(character) < 32 or ord(character) == 127 for character in self.pattern):
+            raise ValidationError({'pattern': 'Use a valid short branch or tag pattern.'})
+        if '..' in self.pattern or '@{' in self.pattern or '//' in self.pattern:
+            raise ValidationError({'pattern': 'Use a valid short branch or tag pattern.'})
+        for component in self.pattern.split('/'):
+            if not component or component.startswith('.') or component.endswith('.lock'):
+                raise ValidationError({'pattern': 'Use a valid short branch or tag pattern.'})
+        open_class = False
+        class_content = 0
+        for character in self.pattern:
+            if character == '[':
+                if open_class:
+                    raise ValidationError({'pattern': 'Use valid shell-style wildcard syntax.'})
+                open_class = True
+                class_content = 0
+            elif character == ']':
+                if not open_class or class_content == 0:
+                    raise ValidationError({'pattern': 'Use valid shell-style wildcard syntax.'})
+                open_class = False
+            elif open_class:
+                class_content += 1
+        if open_class:
+            raise ValidationError({'pattern': 'Use valid shell-style wildcard syntax.'})
+
+    def __str__(self):
+        """Return the protected short-ref pattern and dataset path."""
+
+        return f'{self.kind}:{self.pattern} on {self.dataset.path}'
+
+
 class LfsObject(models.Model):
     """Track one dataset-scoped Git LFS object and its verified lifecycle."""
 
