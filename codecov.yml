@@ -10,6 +10,7 @@ coverage:
           - server
         if_ci_failed: error
         if_not_found: failure
+        informational: false
         target: 85%
         threshold: 0%
       python-client:
@@ -17,6 +18,7 @@ coverage:
           - python-client
         if_ci_failed: error
         if_not_found: failure
+        informational: false
         target: 80%
         threshold: 0%
     patch:
@@ -26,6 +28,7 @@ coverage:
           - server
         if_ci_failed: error
         if_not_found: failure
+        informational: false
         target: 90%
         threshold: 0%
       python-client:
@@ -33,6 +36,7 @@ coverage:
           - python-client
         if_ci_failed: error
         if_not_found: failure
+        informational: false
         target: 90%
         threshold: 0%
 
