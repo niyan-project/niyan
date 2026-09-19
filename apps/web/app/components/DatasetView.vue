@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { BlobMetadata, CommitItem, CommitList, Dataset, DatasetGrant, DownloadAction, GrantList, NamespaceList, Readme, RefList, Role, TreeEntry, TreeList, UserSearchItem } from '~/types/api'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
+import type { BlobMetadata, BrowserDraft, BrowserDraftList, CommitItem, CommitList, Dataset, DatasetGrant, DirectUploadAction, DownloadAction, GrantList, LfsStage, NamespaceList, Readme, RefList, Role, TreeEntry, TreeList, UserSearchItem } from '~/types/api'
 import { NiyanApiError } from '~/composables/useApi'
 
 const props = defineProps<{ dataset: Dataset }>()
@@ -25,6 +27,7 @@ const groupGrantPath = ref<string>()
 const selectedGrantPrincipal = computed(() => grantForm.principal_type === 'user' ? userGrantUsername.value : groupGrantPath.value)
 const canManage = computed(() => props.dataset.role === 'owner')
 const canEdit = computed(() => ['owner', 'maintainer'].includes(props.dataset.role))
+const canWrite = computed(() => ['owner', 'maintainer', 'contributor'].includes(props.dataset.role))
 const datasetPath = computed(() => `${props.dataset.namespace_path}/${props.dataset.slug}`)
 const installationUrl = computed(() => String(runtimeConfig.public.installationUrl || (import.meta.client ? window.location.origin : '')).replace(/\/$/, ''))
 const authLoginCommand = computed(() => `niyan auth login ${installationUrl.value}`)
@@ -45,6 +48,15 @@ const { data: initialData, error: loadError } = await useAsyncData(`dataset-view
   let commits: CommitItem[] = []
   let grants: DatasetGrant[] = []
   let groupCandidates: { label: string, value: string }[] = []
+  let browserDraft: BrowserDraft | null = null
+
+  if (canWrite.value) {
+    const targetBranch = branches.includes(revision.value) ? revision.value : props.dataset.default_branch
+    try {
+      const draftPage = await api.get<BrowserDraftList>(`/api/v1/datasets/${props.dataset.id}/drafts?target_branch=${encodeURIComponent(targetBranch)}`)
+      browserDraft = draftPage.items[0] || null
+    } catch { browserDraft = null }
+  }
 
   if (tab.value === 'files') {
     const query = new URLSearchParams({ revision: revision.value, path: treePath.value, limit: '100' })
@@ -78,7 +90,7 @@ const { data: initialData, error: loadError } = await useAsyncData(`dataset-view
     groupCandidates = namespacePage.items.filter(item => item.kind === 'group' && item.id !== props.dataset.namespace_id).map(item => ({ label: item.path, value: item.path }))
   }
 
-  return { branches, tags, emptyRepository, tree, readme, commits, grants, groupCandidates }
+  return { branches, tags, emptyRepository, tree, readme, commits, grants, groupCandidates, browserDraft }
 }, {
   lazy: false,
   getCachedData: () => undefined
@@ -93,6 +105,13 @@ const grants = ref(initialData.value?.grants || [])
 const groupCandidates = ref(initialData.value?.groupCandidates || [])
 const resolvedCommit = ref<string | null>(tree.value?.resolved_commit || null)
 const breadcrumbs = computed(() => treePath.value ? treePath.value.split('/').map((segment, index, parts) => ({ label: segment, path: parts.slice(0, index + 1).join('/') })) : [])
+const uploadOpen = ref(false)
+const selectedFiles = ref<File[]>([])
+const storageChoice = ref<'auto' | 'git' | 'lfs'>('auto')
+const activeDraft = ref<BrowserDraft | null>(initialData.value?.browserDraft || null)
+const commitMessage = ref('')
+const transferring = ref(false)
+const transferLabel = ref('')
 
 if (loadError.value) {
   toast.add({ title: 'Could not load repository', description: loadError.value.message, color: 'error' })
@@ -179,6 +198,129 @@ async function deleteDataset() {
   saving.value = true
   try { await api.delete(`/api/v1/datasets/${props.dataset.id}`); toast.add({ title: 'Dataset deleted', color: 'success' }); await navigateTo('/') } catch (error) { toast.add({ title: 'Could not delete dataset', description: error instanceof Error ? error.message : undefined, color: 'error' }) } finally { saving.value = false }
 }
+
+async function ensureDraft() {
+  if (activeDraft.value?.state === 'open') return activeDraft.value
+  const targetBranch = branches.value.includes(revision.value) ? revision.value : props.dataset.default_branch
+  activeDraft.value = await api.post<BrowserDraft>(`/api/v1/datasets/${props.dataset.id}/drafts`, { target_branch: targetBranch })
+  return activeDraft.value
+}
+
+function selectedPath(file: File) {
+  return file.webkitRelativePath || file.name
+}
+
+async function storageFor(file: File) {
+  if (file.name === '.gitattributes') return 'git'
+  if (storageChoice.value !== 'auto') return storageChoice.value
+  if (file.size > 10 * 1024 * 1024) return 'lfs'
+  const sample = new Uint8Array(await file.slice(0, 8000).arrayBuffer())
+  return sample.includes(0) ? 'lfs' : 'git'
+}
+
+async function hashFile(file: File) {
+  const hash = sha256.create()
+  const chunkSize = 8 * 1024 * 1024
+  for (let offset = 0; offset < file.size; offset += chunkSize) hash.update(new Uint8Array(await file.slice(offset, Math.min(file.size, offset + chunkSize)).arrayBuffer()))
+  return bytesToHex(hash.digest())
+}
+
+function usableUploadHeaders(headers: Record<string, string>) {
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-length'))
+}
+
+async function putDirect(action: DirectUploadAction, body: Blob) {
+  const response = await fetch(action.href, { method: action.method, headers: usableUploadHeaders(action.header), body })
+  if (!response.ok) throw new Error(`Object storage rejected the upload (${response.status}).`)
+  return response
+}
+
+async function uploadMultipart(file: File, oid: string, layout: NonNullable<LfsStage['multipart']>) {
+  const parts: { part_number: number, etag: string, checksum_sha256?: string, checksum_crc32c?: string, checksum_crc32?: string }[] = []
+  for (let number = 1; number <= layout.part_count; number += 1) {
+    const start = (number - 1) * layout.part_size
+    const part = file.slice(start, Math.min(file.size, start + layout.part_size))
+    const action = await api.post<DirectUploadAction>(`/api/v1/datasets/${props.dataset.id}/lfs/objects/${oid}/multipart/${layout.session_id}/parts/${number}`, { size: part.size })
+    const response = await putDirect(action, part)
+    const etag = response.headers.get('etag')
+    if (!etag) throw new Error('Object storage did not expose the multipart ETag. Its CORS policy must expose the ETag header.')
+    const completedPart: { part_number: number, etag: string, checksum_sha256?: string, checksum_crc32c?: string, checksum_crc32?: string } = { part_number: number, etag }
+    const checksumSha256 = response.headers.get('x-amz-checksum-sha256')
+    const checksumCrc32c = response.headers.get('x-amz-checksum-crc32c')
+    const checksumCrc32 = response.headers.get('x-amz-checksum-crc32')
+    if (checksumSha256) completedPart.checksum_sha256 = checksumSha256
+    if (checksumCrc32c) completedPart.checksum_crc32c = checksumCrc32c
+    if (checksumCrc32) completedPart.checksum_crc32 = checksumCrc32
+    parts.push(completedPart)
+  }
+  await api.post(`/api/v1/datasets/${props.dataset.id}/lfs/objects/${oid}/multipart/${layout.session_id}/complete`, { parts })
+}
+
+async function stageSelectedFiles() {
+  if (!selectedFiles.value.length) return
+  transferring.value = true
+  try {
+    const draft = await ensureDraft()
+    for (const [index, file] of selectedFiles.value.entries()) {
+      const path = selectedPath(file)
+      const storage = await storageFor(file)
+      transferLabel.value = `${index + 1} of ${selectedFiles.value.length}: ${path}`
+      if (storage === 'git') {
+        if (file.size > 10 * 1024 * 1024) throw new Error(`${path} exceeds the 10 MiB ordinary Git limit. Use Git LFS.`)
+        const query = new URLSearchParams({ path, size: String(file.size) })
+        activeDraft.value = await api.put<BrowserDraft>(`/api/v1/datasets/${props.dataset.id}/drafts/${draft.id}/files/git?${query}`, file, { headers: { 'Content-Type': 'application/octet-stream' } })
+        continue
+      }
+      const oid = await hashFile(file)
+      const staged = await api.post<LfsStage>(`/api/v1/datasets/${props.dataset.id}/drafts/${draft.id}/files/lfs`, { path, oid, size: file.size })
+      if (staged.transfer === 'basic' && staged.upload) {
+        await putDirect(staged.upload, file)
+        activeDraft.value = await api.post<BrowserDraft>(`/api/v1/datasets/${props.dataset.id}/drafts/${draft.id}/files/lfs/${oid}/complete`)
+      } else if (staged.transfer === 'multipart' && staged.multipart) {
+        await uploadMultipart(file, oid, staged.multipart)
+        activeDraft.value = await api.get<BrowserDraft>(`/api/v1/datasets/${props.dataset.id}/drafts/${draft.id}`)
+      } else {
+        activeDraft.value = await api.get<BrowserDraft>(`/api/v1/datasets/${props.dataset.id}/drafts/${draft.id}`)
+      }
+    }
+    selectedFiles.value = []
+    uploadOpen.value = false
+    toast.add({ title: 'Files staged in browser draft', color: 'success' })
+  } catch (error) {
+    toast.add({ title: 'Could not stage files', description: error instanceof Error ? error.message : undefined, color: 'error' })
+  } finally {
+    transferring.value = false
+    transferLabel.value = ''
+  }
+}
+
+async function stageFileDeletion(path: string) {
+  try {
+    const draft = await ensureDraft()
+    activeDraft.value = await api.delete<BrowserDraft>(`/api/v1/datasets/${props.dataset.id}/drafts/${draft.id}/files?path=${encodeURIComponent(path)}`)
+    toast.add({ title: 'Deletion staged', color: 'success' })
+  } catch (error) { toast.add({ title: 'Could not stage deletion', description: error instanceof Error ? error.message : undefined, color: 'error' }) }
+}
+
+async function discardDraft() {
+  if (!activeDraft.value) return
+  try {
+    await api.delete(`/api/v1/datasets/${props.dataset.id}/drafts/${activeDraft.value.id}`)
+    activeDraft.value = null
+    commitMessage.value = ''
+    toast.add({ title: 'Draft discarded', color: 'success' })
+  } catch (error) { toast.add({ title: 'Could not discard draft', description: error instanceof Error ? error.message : undefined, color: 'error' }) }
+}
+
+async function publishDraft() {
+  if (!activeDraft.value || !commitMessage.value.trim()) return
+  saving.value = true
+  try {
+    activeDraft.value = await api.post<BrowserDraft>(`/api/v1/datasets/${props.dataset.id}/drafts/${activeDraft.value.id}/commit`, { message: commitMessage.value.trim() })
+    toast.add({ title: 'Dataset commit published', color: 'success' })
+    window.location.reload()
+  } catch (error) { toast.add({ title: 'Could not publish draft', description: error instanceof Error ? error.message : undefined, color: 'error' }) } finally { saving.value = false }
+}
 </script>
 
 <template>
@@ -214,7 +356,14 @@ async function deleteDataset() {
         <UButton label="Root" color="neutral" variant="ghost" @click="navigatePath('')" />
         <template v-for="crumb in breadcrumbs" :key="crumb.path"><span class="text-muted">/</span><UButton :label="crumb.label" color="neutral" variant="ghost" @click="navigatePath(crumb.path)" /></template>
         <span v-if="tree" class="ml-auto font-mono text-xs text-muted">{{ tree.resolved_commit.slice(0, 10) }}</span>
+        <UButton v-if="canWrite" label="Upload files" icon="i-lucide-upload" @click="uploadOpen = true" />
       </div>
+
+      <UCard v-if="activeDraft" class="mb-4">
+        <template #header><div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h2 class="font-medium text-highlighted">Browser commit draft</h2><p class="mt-1 text-sm text-muted">{{ activeDraft.target_branch }} at {{ activeDraft.base_commit?.slice(0, 10) || 'unborn branch' }}</p></div><UBadge color="neutral" variant="subtle">{{ activeDraft.changes.length }} staged</UBadge></div></template>
+        <div class="space-y-2"><div v-for="change in activeDraft.changes" :key="change.path" class="flex flex-wrap items-center gap-2 rounded-md bg-elevated px-3 py-2 text-sm"><UIcon :name="change.operation === 'delete' ? 'i-lucide-trash-2' : 'i-lucide-file-plus-2'" :class="change.operation === 'delete' ? 'text-error' : 'text-primary'" /><span class="min-w-0 flex-1 truncate font-mono">{{ change.path }}</span><UBadge color="neutral" variant="outline">{{ change.operation === 'delete' ? 'delete' : change.storage }}</UBadge><UBadge v-if="!change.ready" color="warning" variant="subtle">upload incomplete</UBadge></div></div>
+        <div class="mt-4 grid gap-3"><UFormField label="Commit message"><UTextarea v-model="commitMessage" class="w-full" :maxlength="100000" autoresize /></UFormField><div class="flex justify-end gap-2"><UButton label="Discard" color="neutral" variant="outline" @click="discardDraft" /><UButton label="Commit changes" icon="i-lucide-git-commit-horizontal" :disabled="!activeDraft.changes.length || activeDraft.changes.some(change => !change.ready) || !commitMessage.trim()" :loading="saving" @click="publishDraft" /></div></div>
+      </UCard>
 
       <UCard v-if="emptyRepository">
         <template #header><div class="flex items-start gap-3"><UIcon name="i-lucide-git-commit-horizontal" class="mt-0.5 size-5 text-primary" /><div><h2 class="font-medium text-highlighted">This dataset is ready for its first files</h2><p class="mt-1 text-sm text-muted">Use the Niyān CLI so authentication, Git LFS, and the remote are configured safely.</p></div></div></template>
@@ -226,11 +375,10 @@ async function deleteDataset() {
         <div class="relative rounded-md bg-elevated p-4 pr-12"><pre class="overflow-x-auto text-sm"><code>{{ emptyGuide === 'new' ? newDatasetCommands : existingDatasetCommands }}</code></pre><UButton icon="i-lucide-copy" aria-label="Copy setup commands" color="neutral" variant="ghost" size="sm" class="absolute right-2 top-2" @click="copyText(emptyGuide === 'new' ? newDatasetCommands : existingDatasetCommands, 'Setup commands copied')" /></div>
       </UCard>
       <div v-else class="overflow-hidden rounded-lg border border-default bg-default">
-        <button v-for="entry in tree?.items" :key="entry.path" type="button" class="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-default p-3 text-left last:border-b-0 hover:bg-elevated sm:grid-cols-[minmax(0,1fr)_10rem_8rem]" @click="openEntry(entry)">
-          <span class="flex min-w-0 items-center gap-2"><UIcon :name="entry.object_type === 'tree' ? 'i-lucide-folder' : 'i-lucide-file'" class="size-4 shrink-0 text-primary" /><span class="truncate text-highlighted">{{ entry.name }}</span></span>
-          <span class="hidden font-mono text-xs text-muted sm:block">{{ entry.object_id.slice(0, 10) }}</span>
-          <span class="text-right text-sm text-muted">{{ entry.object_type === 'tree' ? 'Directory' : formatBytes(entry.size) }}</span>
-        </button>
+        <div v-for="entry in tree?.items" :key="entry.path" class="flex items-center border-b border-default last:border-b-0 hover:bg-elevated">
+          <button type="button" class="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 p-3 text-left sm:grid-cols-[minmax(0,1fr)_10rem_8rem]" @click="openEntry(entry)"><span class="flex min-w-0 items-center gap-2"><UIcon :name="entry.object_type === 'tree' ? 'i-lucide-folder' : 'i-lucide-file'" class="size-4 shrink-0 text-primary" /><span class="truncate text-highlighted">{{ entry.name }}</span></span><span class="hidden font-mono text-xs text-muted sm:block">{{ entry.object_id.slice(0, 10) }}</span><span class="text-right text-sm text-muted">{{ entry.object_type === 'tree' ? 'Directory' : formatBytes(entry.size) }}</span></button>
+          <UButton v-if="canWrite && entry.object_type === 'blob'" icon="i-lucide-trash-2" :aria-label="`Stage deletion of ${entry.name}`" color="error" variant="ghost" class="mr-2 shrink-0" @click="stageFileDeletion(entry.path)" />
+        </div>
       </div>
 
       <UCard v-if="selectedBlob" class="mt-4">
@@ -278,5 +426,10 @@ async function deleteDataset() {
       <UCard><template #header><h2 class="font-medium">Dataset details</h2></template><form class="grid gap-4 sm:grid-cols-2" @submit.prevent="updateDataset"><UFormField label="Name"><UInput v-model="editForm.name" class="w-full" /></UFormField><UFormField label="Slug"><UInput v-model="editForm.slug" class="w-full" /></UFormField><UFormField label="Description" hint="Optional" class="sm:col-span-2"><UTextarea v-model="editForm.description" :maxlength="500" autoresize class="w-full" /></UFormField><div class="flex justify-end sm:col-span-2"><UButton type="submit" label="Save changes" :loading="saving" /></div></form></UCard>
       <UCard v-if="canManage" class="ring-error/30"><template #header><h2 class="font-medium text-error">Delete dataset</h2></template><p class="mb-4 text-sm text-muted">Type <strong class="font-mono text-highlighted">{{ dataset.namespace_path }}/{{ dataset.slug }}</strong> to permanently delete the repository and its files.</p><div class="flex flex-col gap-3 sm:flex-row"><UInput v-model="deleteConfirmation" class="flex-1" /><UButton label="Delete dataset" color="error" :disabled="deleteConfirmation !== `${dataset.namespace_path}/${dataset.slug}`" :loading="saving" @click="deleteDataset" /></div></UCard>
     </section>
+
+    <UModal v-model:open="uploadOpen" title="Stage files for a browser commit" description="Files are staged in a private draft until you explicitly commit them.">
+      <template #body><div class="space-y-4"><UFileUpload v-model="selectedFiles" multiple class="w-full" label="Choose dataset files" description="Binary files and files above 10 MiB use Git LFS automatically." /><UFormField label="Storage"><USelect v-model="storageChoice" :items="[{ label: 'Automatic (recommended)', value: 'auto' }, { label: 'Ordinary Git', value: 'git' }, { label: 'Git LFS', value: 'lfs' }]" class="w-full" /></UFormField><UAlert v-if="transferLabel" color="neutral" variant="soft" :description="transferLabel" /></div></template>
+      <template #footer><div class="flex w-full justify-end gap-2"><UButton label="Cancel" color="neutral" variant="outline" :disabled="transferring" @click="uploadOpen = false" /><UButton label="Stage files" icon="i-lucide-upload" :disabled="!selectedFiles.length" :loading="transferring" @click="stageSelectedFiles" /></div></template>
+    </UModal>
   </UContainer>
 </template>

@@ -14,6 +14,7 @@
   "dependencies": {
     "@iconify-json/lucide": "^1.2.131",
     "@iconify-json/simple-icons": "^1.2.95",
+    "@noble/hashes": "^2.4.0",
     "@nuxt/ui": "^4.11.1",
     "markdown-it": "^14.1.0",
     "nuxt": "^4.5.2",
@@ -21,10 +22,10 @@
     "vue": "3.5.42"
   },
   "devDependencies": {
+    "@nuxt/eslint": "^1.17.0",
     "@nuxt/test-utils": "^4.0.0",
     "@types/markdown-it": "^14.1.2",
     "@vue/test-utils": "^2.4.6",
-    "@nuxt/eslint": "^1.17.0",
     "eslint": "^10.10.0",
     "eslint-plugin-better-tailwindcss": "^4.7.0",
     "happy-dom": "^20.0.10",

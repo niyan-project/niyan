@@ -13,7 +13,7 @@ export class NiyanApiError extends Error {
 }
 
 type ApiOptions = Parameters<typeof $fetch>[1]
-type ApiMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE'
+type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export function useApi() {
   const csrfToken = useState<string | null>('csrf-token', () => null)
@@ -46,6 +46,7 @@ export function useApi() {
     resetCsrf,
     get: <T>(url: string, options: ApiOptions = {}) => request<T>(url, { ...options, method: 'GET' }),
     post: <T>(url: string, body?: unknown, options: ApiOptions = {}) => request<T>(url, { ...options, method: 'POST', body: body as never }),
+    put: <T>(url: string, body?: unknown, options: ApiOptions = {}) => request<T>(url, { ...options, method: 'PUT', body: body as never }),
     patch: <T>(url: string, body?: unknown, options: ApiOptions = {}) => request<T>(url, { ...options, method: 'PATCH', body: body as never }),
     delete: <T>(url: string, options: ApiOptions = {}) => request<T>(url, { ...options, method: 'DELETE' })
   }

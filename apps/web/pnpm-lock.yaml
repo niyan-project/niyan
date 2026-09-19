@@ -172,6 +172,9 @@ importers:
       '@iconify-json/simple-icons':
         specifier: ^1.2.95
         version: 1.2.95
+      '@noble/hashes':
+        specifier: ^2.4.0
+        version: 2.4.0
       '@nuxt/ui':
         specifier: ^4.11.1
         version: 4.11.1(eca17b8ed6a8c2e0333db097eb5fb743)
@@ -976,6 +979,10 @@ packages:
     peerDependencies:
       '@emnapi/core': ^2.0.0-alpha.3
       '@emnapi/runtime': ^2.0.0-alpha.3
+
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
 
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
@@ -6660,6 +6667,8 @@ snapshots:
       '@emnapi/runtime': 2.0.0-alpha.3
       '@tybys/wasm-util': 0.10.3
     optional: true
+
+  '@noble/hashes@2.4.0': {}
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:

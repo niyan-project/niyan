@@ -24,3 +24,9 @@ export interface AccessTokenMetadata { id: string, name: string, origin: 'manual
 export interface AccessTokenCreated extends AccessTokenMetadata { token: string }
 export interface AccessTokenList { count: number, items: AccessTokenMetadata[] }
 export interface DeviceAuthorization { user_code: string, name: string, scopes: string[], dataset_path: string | null, expires_at: string }
+export interface BrowserDraftChange { path: string, operation: 'upsert' | 'delete', storage: 'git' | 'lfs' | '', size: number | null, oid: string | null, ready: boolean }
+export interface BrowserDraft { id: string, dataset_id: string, target_branch: string, base_commit: string | null, state: 'open' | 'committed' | 'discarded', committed_oid: string | null, expires_at: string, changes: BrowserDraftChange[] }
+export interface BrowserDraftList { count: number, items: BrowserDraft[] }
+export interface DirectUploadAction { method: 'PUT', href: string, header: Record<string, string>, expires_in: number }
+export interface MultipartLayout { session_id: string, part_size: number, part_count: number }
+export interface LfsStage { change: BrowserDraftChange, transfer: 'existing' | 'basic' | 'multipart', upload: DirectUploadAction | null, multipart: MultipartLayout | null }

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DatasetView from '~/components/DatasetView.vue'
 import type { Dataset } from '~/types/api'
 
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 const currentRoute = vi.hoisted(() => ({ query: { tab: 'files' } as Record<string, string>, fullPath: '/lab/images?tab=files' }))
 
 mockNuxtImport('useApi', () => () => api)
@@ -38,6 +38,7 @@ describe('dataset repository view', () => {
   beforeEach(() => {
     api.get.mockReset()
     api.post.mockReset()
+    api.put.mockReset()
     api.patch.mockReset()
     api.delete.mockReset()
     currentRoute.query = { tab: 'files' }
@@ -87,6 +88,21 @@ describe('dataset repository view', () => {
 
     const entry = wrapper.findAll('button').find(button => button.text().includes('notes.txt'))
     expect(entry?.attributes('type')).toBe('button')
+  })
+
+  it('creates an explicit browser draft before staging a file deletion', async () => {
+    const draft = { id: 'draft-id', dataset_id: dataset.id, target_branch: 'main', base_commit: 'a'.repeat(40), state: 'open', committed_oid: null, expires_at: '2030-01-02T00:00:00Z', changes: [] }
+    api.post.mockResolvedValue(draft)
+    api.delete.mockResolvedValue({ ...draft, changes: [{ path: 'notes.txt', operation: 'delete', storage: '', size: null, oid: null, ready: true }] })
+    const wrapper = await mountSuspended(DatasetView, { props: { dataset }, route: '/lab/images?tab=files' })
+    await flushPromises()
+
+    await wrapper.find('button[aria-label="Stage deletion of notes.txt"]').trigger('click')
+    await flushPromises()
+
+    expect(api.post).toHaveBeenCalledWith('/api/v1/datasets/dataset-id/drafts', { target_branch: 'main' })
+    expect(api.delete).toHaveBeenCalledWith('/api/v1/datasets/dataset-id/drafts/draft-id/files?path=notes.txt')
+    expect(wrapper.text()).toContain('Browser commit draft')
   })
 
   it('uses usernames and group paths as human-facing access principals', async () => {
