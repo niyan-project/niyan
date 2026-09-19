@@ -59,5 +59,21 @@ include = [
 
 [dependency-groups]
 dev = [
+    "coverage>=7.10",
     "polars>=1.0",
 ]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["niyan"]
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"

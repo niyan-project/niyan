@@ -67,7 +67,21 @@ jobs:
         run: .venv/bin/python manage.py makemigrations --check --dry-run
       - name: Run server and cross-component tests
         working-directory: apps/server
-        run: .venv/bin/python manage.py test --keepdb
+        run: .venv/bin/coverage run manage.py test --keepdb
+      - name: Generate server coverage reports
+        working-directory: apps/server
+        run: |
+          .venv/bin/coverage report
+          .venv/bin/coverage xml
+          .venv/bin/coverage html
+      - name: Upload server coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-coverage
+          path: |
+            apps/server/coverage.xml
+            apps/server/htmlcov
+          if-no-files-found: error
 
   python-client:
     name: Python client (${{ matrix.python-version }})
@@ -92,7 +106,21 @@ jobs:
         run: uv sync --frozen
       - name: Run client tests
         working-directory: clients/python
-        run: .venv/bin/python -m unittest discover -s tests
+        run: .venv/bin/coverage run -m unittest discover -s tests
+      - name: Generate client coverage reports
+        working-directory: clients/python
+        run: |
+          .venv/bin/coverage report
+          .venv/bin/coverage xml
+          .venv/bin/coverage html
+      - name: Upload client coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-client-${{ matrix.python-version }}-coverage
+          path: |
+            clients/python/coverage.xml
+            clients/python/htmlcov
+          if-no-files-found: error
 
   web:
     name: Nuxt checks and build

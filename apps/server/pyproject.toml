@@ -15,5 +15,23 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "coverage>=7.10",
     "fsspec>=2025.3.0",
 ]
+
+[tool.coverage.run]
+branch = true
+omit = ["*/asgi.py", "*/migrations/*", "*/tests/*", "*/wsgi.py"]
+relative_files = true
+source = ["accounts", "datasets", "namespaces", "project"]
+
+[tool.coverage.report]
+omit = ["*/asgi.py", "*/migrations/*", "*/tests/*", "*/wsgi.py"]
+precision = 1
+show_missing = true
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
