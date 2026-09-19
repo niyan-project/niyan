@@ -8,15 +8,33 @@ coverage:
       server:
         flags:
           - server
-        informational: true
-        target: auto
+        if_ci_failed: error
+        if_not_found: failure
+        target: 85%
+        threshold: 0%
       python-client:
         flags:
           - python-client
-        informational: true
-        target: auto
+        if_ci_failed: error
+        if_not_found: failure
+        target: 80%
+        threshold: 0%
     patch:
       default: off
+      server:
+        flags:
+          - server
+        if_ci_failed: error
+        if_not_found: failure
+        target: 90%
+        threshold: 0%
+      python-client:
+        flags:
+          - python-client
+        if_ci_failed: error
+        if_not_found: failure
+        target: 90%
+        threshold: 0%
 
 comment:
   behavior: default

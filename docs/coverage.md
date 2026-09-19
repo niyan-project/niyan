@@ -11,7 +11,7 @@ The Phase 8 baseline, measured by Codecov on `main`, is:
 | Django server | 77.36% | 85% | Ratchet toward 90% or higher |
 | Python client | 69.37% | 80% | Ratchet toward 90% or higher |
 
-Once both initial targets are reached, CI must enforce the component targets and 90% patch coverage for each flag. The targets should be raised in reviewable increments as meaningful tests land; they must not be lowered merely to make a change pass.
+CI enforces the component targets and 90% patch coverage for each flag. The targets should be raised in reviewable increments as meaningful tests land; they must not be lowered merely to make a change pass.
 
 ## Risk priorities
 
@@ -31,6 +31,6 @@ Coverage must never be increased by deleting scenarios, weakening assertions, re
 
 ## CI behavior
 
-The `server` and `python-client` flags are uploaded independently on every applicable CI run. Missing or failed uploads fail CI. Project and patch checks become blocking after the Phase 8 targets are reached.
+The `server` and `python-client` flags are uploaded independently on every applicable CI run. Missing or failed uploads fail CI. Their project and patch checks are blocking.
 
 When a legitimate behavior change lowers coverage, the preferred response is to add the missing test in the same change. A temporary exception must identify an owner, explain the concrete blocker, and state when the exception will be removed.
