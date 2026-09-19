@@ -32,6 +32,26 @@ SECRET_KEY = env('NIYAN_SECRET_KEY')
 DEBUG = env.bool('NIYAN_DEBUG', default=False)
 
 ALLOWED_HOSTS = env.list('NIYAN_ALLOWED_HOSTS', default=[])
+CSRF_TRUSTED_ORIGINS = env.list('NIYAN_CSRF_TRUSTED_ORIGINS', default=[])
+
+# Production settings fail toward HTTPS. Development explicitly opts out by
+# setting NIYAN_DEBUG=true rather than inheriting weaker production defaults.
+production_security_default = not DEBUG
+SECURE_SSL_REDIRECT = env.bool('NIYAN_SECURE_SSL_REDIRECT', default=production_security_default)
+SESSION_COOKIE_SECURE = env.bool('NIYAN_SESSION_COOKIE_SECURE', default=production_security_default)
+CSRF_COOKIE_SECURE = env.bool('NIYAN_CSRF_COOKIE_SECURE', default=production_security_default)
+SECURE_HSTS_SECONDS = env.int('NIYAN_SECURE_HSTS_SECONDS', default=31_536_000 if production_security_default else 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool('NIYAN_SECURE_HSTS_INCLUDE_SUBDOMAINS', default=False)
+SECURE_HSTS_PRELOAD = env.bool('NIYAN_SECURE_HSTS_PRELOAD', default=False)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+if env.bool('NIYAN_BEHIND_HTTPS_PROXY', default=False):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
 
 
 # Application definition
@@ -194,6 +214,31 @@ STORAGES = {
     'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
 }
 WHITENOISE_MAX_AGE = 31_536_000
+
+LOG_LEVEL = env('NIYAN_LOG_LEVEL', default='INFO').upper()
+LOG_FORMAT = env('NIYAN_LOG_FORMAT', default='console' if DEBUG else 'json')
+if LOG_FORMAT not in {'console', 'json'}:
+    raise ImproperlyConfigured('NIYAN_LOG_FORMAT must be either console or json.')
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'console': {'format': '{levelname} {name}: {message}', 'style': '{'},
+        'json': {'()': 'project.logging.JsonFormatter'},
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': LOG_FORMAT,
+        },
+    },
+    'root': {'handlers': ['console'], 'level': LOG_LEVEL},
+    'loggers': {
+        'django.server': {'handlers': ['console'], 'level': LOG_LEVEL, 'propagate': False},
+        'django.request': {'handlers': ['console'], 'level': LOG_LEVEL, 'propagate': False},
+    },
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

@@ -4,6 +4,12 @@
 
 The server reads runtime configuration from environment variables. For local development, `django-environ` loads the gitignored `.env` file in this directory; operating-system environment variables take precedence. Start from `.env.example` and provide real values for the deployment.
 
+Production uses Gunicorn and defaults to HTTPS-only behavior when `NIYAN_DEBUG=false`: secure session and CSRF cookies, redirect-to-HTTPS, and a one-year HSTS lifetime. Set `NIYAN_BEHIND_HTTPS_PROXY=true` only when a trusted reverse proxy overwrites `X-Forwarded-Proto`; Django then uses that header to recognize the original HTTPS request. `NIYAN_CSRF_TRUSTED_ORIGINS` contains complete trusted origins, while `NIYAN_ALLOWED_HOSTS` contains host names. HSTS subdomains and preload remain explicit opt-ins because enabling either without controlling the entire domain can make other services unreachable.
+
+Production logs are single-line JSON by default and contain timestamp, severity, logger, message, optional HTTP status, and exception text. The formatter deliberately does not serialize request headers, bodies, cookies, tokens, or arbitrary record attributes. Set `NIYAN_LOG_FORMAT=console` for human-readable local output and use `NIYAN_LOG_LEVEL` to select the minimum severity.
+
+`/health/live` checks only that the process can serve HTTP. `/health/ready` checks PostgreSQL and the readable, writable `NIYAN_GIT_ROOT`; neither response includes backend exceptions or credentials. S3 is intentionally absent from readiness so a temporary object-store outage does not remove otherwise healthy control-plane instances from service. Run `python manage.py check --deploy` with production environment values before an upgrade. Its warnings about HSTS subdomains and preload are expected unless those deployment-wide choices were explicitly enabled.
+
 `django-environ` provides typed environment parsing, including Django database URLs. `psycopg` is the PostgreSQL adapter required by Django for `NIYAN_DATABASE_URL` connections.
 
 `NIYAN_GIT_ROOT` is required and selects the persistent filesystem directory containing UUID-addressed bare dataset repositories. A production installation normally uses a service-owned path such as `/var/lib/niyan/repositories` or a mounted persistent volume. Git LFS object content remains in the configured S3-compatible bucket rather than this directory.

@@ -20,9 +20,12 @@ from django.urls import path
 from datasets.git_http import git_http_backend
 from datasets.lfs_http import lfs_batch, lfs_verify
 from project.api import api
+from project.health import live, ready
 from project.web import spa_entry
 
 urlpatterns = [
+    path('health/live', live, name='health-live'),
+    path('health/ready', ready, name='health-ready'),
     path('admin/', admin.site.urls),
     path('api/v1/', api.urls),
     path('git/<uuid:dataset_id>.git/info/lfs/objects/batch', lfs_batch, name='git-lfs-batch'),
