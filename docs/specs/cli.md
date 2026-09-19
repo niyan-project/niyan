@@ -185,6 +185,8 @@ niyan dataset status
 
 These commands manage standard Git submodules. `dataset add` resolves and checks out the dataset, records the standard Git URL, and stages the parent repository's `.gitmodules` and gitlink changes without committing the parent repository. It must refuse to add a dataset inside another Niyān dataset checkout.
 
+Without `--ref`, `dataset add` pins the current tip of the dataset's default branch and records that branch as the moving source used by later `dataset update`. An explicitly selected branch is likewise recorded as a moving source. An explicitly selected tag or commit pins only that immutable commit. The parent repository always records an exact gitlink regardless of whether future updates follow a configured branch.
+
 `dataset remove` removes the selected dataset dependency and stages the corresponding parent-repository changes without committing them. `dataset update` resolves an explicit revision or updates according to the dependency's configured branch, checks out an exact commit, and stages the changed gitlink. `dataset status` shows each attached dataset, path, host, immutable UUID, pinned commit, configured moving ref if any, checkout state, and unavailable LFS content.
 
 The parent project remains an ordinary Git repository, so its user may commit these dependency changes with their normal Git workflow. Niyān never stores credentials in `.gitmodules`.

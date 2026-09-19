@@ -30,6 +30,8 @@ Any authenticated user may create a root group. The creator becomes a direct own
 
 Owners may rename a group, change its slug, manage direct memberships, and permanently delete it once it contains no child groups or datasets. Direct membership records may be created, assigned another role, or removed. Inherited membership is computed from ancestors and is never materialized as an editable membership in a descendant.
 
+V1 membership management adds an existing installation user by exact username. It does not send email, create pending invitations, or allow a person who does not already have an administrator-created account to register through an invitation.
+
 A slug must be unique among the datasets and child namespaces directly beneath the same namespace. Root namespace slugs must be unique installation-wide. This shared path constraint prevents a path from ambiguously naming both a subgroup and a dataset.
 
 The full namespace path is derived from ancestor slugs. It is a mutable locator for people and Git remotes, not a persistent identifier. Moving or renaming a group changes its human-facing path while preserving all namespace and dataset UUIDs.

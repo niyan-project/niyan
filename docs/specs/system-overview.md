@@ -159,10 +159,8 @@ Administrators are responsible for coordinated backups of Git repositories, Post
 
 ## Tracked V1 Decisions
 
-The accepted overview does not imply that every component contract is finished. These genuinely unresolved v1 decisions have explicit tracker ownership:
+The accepted overview does not imply that every component contract is finished. The configurable protected-ref and browser-commit decisions are now defined by their focused accepted specifications. These remaining genuinely unresolved v1 decisions have explicit tracker ownership:
 
-- [Issue #34](https://github.com/aryan-f/Niyan/issues/34) defines configurable protected-ref rules beyond the accepted fast-forward-only baseline.
-- [Issue #36](https://github.com/aryan-f/Niyan/issues/36) defines browser upload staging and explicit commit creation.
 - [Issue #41](https://github.com/aryan-f/Niyan/issues/41) defines the viewer plugin contract, trust model, and isolation boundary.
 - [Issue #47](https://github.com/aryan-f/Niyan/issues/47) defines coordinated backup, restore, upgrade, and disaster-recovery behavior across PostgreSQL, Git repositories, and object storage.
 - [Issue #50](https://github.com/aryan-f/Niyan/issues/50) selects the open-source license and project-governance model.

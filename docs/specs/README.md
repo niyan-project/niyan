@@ -25,8 +25,11 @@ Architecture decision records use corresponding `Proposed`, `Accepted`, `Depreca
 - [Namespaces and datasets](namespaces-and-datasets.md) — stable identity, human-facing paths, and dataset repository creation.
 - [Python filesystem client](python-client.md) — the unified package's read-only `fsspec` surface for streaming and downloads.
 - [Web application](web-application.md) — the Nuxt SPA, same-origin deployment, visual system, browser workflows, and Phase 3 acceptance boundary.
+- [Protected refs](protected-refs.md) — optional dataset branch and tag mutation restrictions layered over baseline Git write policy.
+- [Browser uploads and commits](browser-commits.md) — draft staging, direct LFS transfer, and conflict-safe Git commit publication from the web application.
+- [Audit events](audit-events.md) — durable, append-only security and collaboration history with scoped visibility.
 
-The system overview, authentication, authorization, namespace and dataset lifecycle, repository-read contract, Git write policy, Git LFS protocol, Git LFS tracking policy, CLI, Python filesystem client, and web application are accepted.
+The system overview, authentication, authorization, namespace and dataset lifecycle, repository-read contract, Git write policy, Git LFS protocol, Git LFS tracking policy, CLI, Python filesystem client, web application, protected-ref, browser-commit, and audit-event specifications are accepted.
 
 As the design becomes concrete, split the overview into focused specifications for the remaining storage lifecycle, REST API, viewer plugins, and deployment behavior. Do not create those documents merely to fill out a directory; create each when it has enough substance to review.
 
