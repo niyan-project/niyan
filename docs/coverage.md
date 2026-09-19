@@ -31,7 +31,7 @@ Coverage must never be increased by deleting scenarios, weakening assertions, re
 
 ## CI behavior
 
-The `server` and `python-client` flags are uploaded independently on every applicable CI run. Missing or failed uploads fail CI. Their project and patch checks are blocking.
+The `server` and `python-client` flags are uploaded independently on every applicable CI run. Missing or failed uploads fail CI. The component jobs enforce the 85% and 80% project floors directly, while Codecov enforces the configured project statuses and 90% patch statuses.
 
 Pull requests must pass `codecov/project/server`, `codecov/project/python-client`, `codecov/patch/server`, and `codecov/patch/python-client` in addition to the component test jobs.
 
