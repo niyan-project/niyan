@@ -2,10 +2,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from django.test import Client, TestCase, override_settings
+from django.contrib.auth.models import Group, Permission
 
 from accounts.models import User
 from datasets.models import Dataset, DatasetGrant
-from datasets.policies import can_create_dataset, can_delete_dataset, can_manage_dataset_grants, can_read_dataset, can_update_dataset, can_write_repository, get_dataset_role
+from datasets.policies import can_create_dataset, can_delete_dataset, can_manage_dataset_grants, can_manage_group, can_read_dataset, can_update_dataset, can_view_namespace, can_write_repository, get_dataset_role
 from namespaces.models import Namespace, NamespaceMembership
 
 
@@ -70,6 +71,49 @@ class DatasetPolicyTests(TestCase):
         NamespaceMembership.objects.create(namespace=self.root_group, user=self.user, role=NamespaceMembership.Role.MAINTAINER)
 
         self.assertTrue(can_create_dataset(user=self.user, namespace=self.child_group))
+
+    def test_staff_model_permissions_grant_installation_wide_dataset_authority(self):
+        """Apply Django group permissions only to staff acting as operators."""
+
+        operator = User.objects.create_user(username='operator', is_staff=True)
+        operators = Group.objects.create(name='Dataset operators')
+        operators.permissions.add(
+            Permission.objects.get(content_type__app_label='datasets', codename='view_dataset'),
+            Permission.objects.get(content_type__app_label='datasets', codename='change_dataset'),
+        )
+        operator.groups.add(operators)
+
+        self.assertEqual(get_dataset_role(user=operator, dataset=self.dataset), NamespaceMembership.Role.MAINTAINER)
+        self.assertTrue(can_read_dataset(user=operator, dataset=self.dataset))
+        self.assertTrue(can_write_repository(user=operator, dataset=self.dataset))
+        self.assertTrue(can_update_dataset(user=operator, dataset=self.dataset))
+        self.assertTrue(can_manage_dataset_grants(user=operator, dataset=self.dataset))
+        self.assertFalse(can_delete_dataset(user=operator, dataset=self.dataset))
+
+    def test_staff_delete_permission_does_not_imply_change_permission(self):
+        """Preserve Django's granular model permissions across product policies."""
+
+        operator = User.objects.create_user(username='operator', is_staff=True)
+        operator.user_permissions.add(Permission.objects.get(content_type__app_label='datasets', codename='delete_dataset'))
+
+        self.assertTrue(can_read_dataset(user=operator, dataset=self.dataset))
+        self.assertTrue(can_delete_dataset(user=operator, dataset=self.dataset))
+        self.assertFalse(can_write_repository(user=operator, dataset=self.dataset))
+        self.assertFalse(can_update_dataset(user=operator, dataset=self.dataset))
+        self.assertFalse(can_manage_dataset_grants(user=operator, dataset=self.dataset))
+
+    def test_staff_namespace_permissions_apply_without_becoming_niyan_memberships(self):
+        """Authorize system group operations without materializing product roles."""
+
+        operator = User.objects.create_user(username='operator', is_staff=True)
+        operator.user_permissions.add(
+            Permission.objects.get(content_type__app_label='namespaces', codename='view_namespace'),
+            Permission.objects.get(content_type__app_label='namespaces', codename='change_namespace'),
+        )
+
+        self.assertTrue(can_view_namespace(user=operator, namespace=self.child_group))
+        self.assertTrue(can_manage_group(user=operator, namespace=self.child_group))
+        self.assertIsNone(NamespaceMembership.objects.filter(user=operator).first())
 
 
 class DatasetGrantApiTests(TestCase):

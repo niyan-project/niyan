@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** web, server, deployment, and viewer-plugin maintainers
-- **Last reviewed:** 2026-09-18
+- **Last reviewed:** 2026-09-20
 
 ## Purpose
 
@@ -40,13 +40,15 @@ Color must never be the only indicator of meaning. Keyboard focus, contrast, tou
 
 ## Browser Authentication
 
-There is no public registration. An installation administrator creates the initial Django superuser, signs in, and creates additional users through Django admin.
+There is no public registration. An installation administrator creates the initial Django superuser, signs in, and provisions additional users through the staff-only System area. Django admin remains available for assigning staff status and Django auth-group permissions.
 
 The web application must provide username-and-password sign-in, sign-out, current-account state, and CSRF initialization through same-origin Django endpoints. It must not store passwords, session identifiers, access-token secrets, or signed object-storage URLs in browser-persistent storage.
 
-The primary header exposes datasets and groups beside the Niyān logo. Account-specific destinations belong in a compact user menu beside the independent color-mode control. That menu contains only Settings and Log out rather than placing access tokens or individual settings destinations in primary navigation.
+The primary header exposes datasets and groups beside the Niyān logo. Staff users with at least one supported installation-wide permission also see System immediately after Groups. Account-specific destinations belong in a compact user menu beside the independent color-mode control. That menu contains only Settings and Log out rather than placing access tokens or individual settings destinations in primary navigation.
 
 Settings use a persistent left sidebar organized into labeled sections. V1 exposes one section, Security, with separate email, password-and-authentication, and access-token pages; it does not add a redundant account-review landing page. Email and password changes are available only through an authenticated browser session, require the current password, and remain CSRF-protected. A successful password change retains the explicitly confirmed current session; Django's session-auth hash invalidates other sessions that still carry the old password hash.
+
+System administration uses the same persistent-sidebar pattern but is not part of personal Settings. Its initial Administration section contains Users, Groups, and Datasets, hiding destinations for which the current staff user has no supported Django model permission. The Users page lists accounts with `accounts.view_user` and provisions active, non-staff accounts with `accounts.add_user`; every new account receives its personal namespace in the same operation. Staff status, superuser status, Django auth-group membership, and user deletion remain Django-admin operations until their product workflows and destructive effects are specified. The Groups and Datasets pages provide installation-wide discovery and link into the ordinary resource pages, whose existing mutations remain authoritative.
 
 Anonymous navigation to an authenticated page redirects to sign-in while preserving a safe local return path. Authenticated navigation to sign-in redirects to the dashboard.
 

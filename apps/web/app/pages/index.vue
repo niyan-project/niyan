@@ -100,14 +100,14 @@ async function createDataset() {
 
     <div v-if="showGroups" class="mt-6 grid gap-3 md:grid-cols-2">
       <NuxtLink v-for="group in groups" :key="group.id" :to="`/${group.path}`" class="rounded-lg border border-default bg-default p-4 transition-colors hover:bg-elevated">
-        <div class="flex items-start justify-between gap-3"><div><h2 class="font-medium text-highlighted">{{ group.name }}</h2><p class="mt-1 font-mono text-sm text-muted">{{ group.path }}</p></div><UBadge color="neutral" variant="subtle">{{ group.role || 'dataset access' }}</UBadge></div>
+        <div class="flex items-start justify-between gap-3"><div><h2 class="font-medium text-highlighted">{{ group.name }}</h2><p class="mt-1 font-mono text-sm text-muted">{{ group.path }}</p></div><UBadge color="neutral" variant="subtle">{{ group.role || 'system' }}</UBadge></div>
       </NuxtLink>
       <UCard v-if="!groups.length"><p class="text-muted">No groups match this view.</p></UCard>
     </div>
     <div v-else class="mt-6 overflow-hidden rounded-lg border border-default bg-default">
       <NuxtLink v-for="dataset in filteredDatasets" :key="dataset.id" :to="`/${dataset.namespace_path}/${dataset.slug}`" class="flex flex-col gap-2 border-b border-default p-4 last:border-b-0 hover:bg-elevated sm:flex-row sm:items-center sm:justify-between">
         <div><h2 class="font-medium text-highlighted">{{ dataset.name }}</h2><p class="mt-1 font-mono text-sm text-muted">{{ dataset.namespace_path }}/{{ dataset.slug }}</p><p v-if="dataset.description" class="mt-2 text-sm text-muted">{{ dataset.description }}</p></div>
-        <div class="flex items-center gap-3 text-sm text-muted"><UBadge color="neutral" variant="subtle">{{ dataset.role }}</UBadge><span>{{ formatRelative(dataset.created_at) }}</span></div>
+        <div class="flex items-center gap-3 text-sm text-muted"><UBadge color="neutral" variant="subtle">{{ dataset.role || 'system' }}</UBadge><span>{{ formatRelative(dataset.created_at) }}</span></div>
       </NuxtLink>
       <div v-if="!filteredDatasets.length" class="p-8 text-center text-muted">No datasets match this view.</div>
     </div>

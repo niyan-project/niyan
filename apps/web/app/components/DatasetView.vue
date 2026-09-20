@@ -25,9 +25,10 @@ const grantForm = reactive<{ principal_type: 'user' | 'group', role: Role }>({ p
 const userGrantUsername = ref<string>()
 const groupGrantPath = ref<string>()
 const selectedGrantPrincipal = computed(() => grantForm.principal_type === 'user' ? userGrantUsername.value : groupGrantPath.value)
-const canManage = computed(() => props.dataset.role === 'owner')
-const canEdit = computed(() => ['owner', 'maintainer'].includes(props.dataset.role))
-const canWrite = computed(() => ['owner', 'maintainer', 'contributor'].includes(props.dataset.role))
+const canManage = computed(() => props.dataset.can_manage_access)
+const canEdit = computed(() => props.dataset.can_update)
+const canWrite = computed(() => props.dataset.can_write)
+const canDelete = computed(() => props.dataset.can_delete)
 const datasetPath = computed(() => `${props.dataset.namespace_path}/${props.dataset.slug}`)
 const installationUrl = computed(() => String(runtimeConfig.public.installationUrl || (import.meta.client ? window.location.origin : '')).replace(/\/$/, ''))
 const authLoginCommand = computed(() => `niyan auth login ${installationUrl.value}`)
@@ -347,7 +348,7 @@ async function publishDraft() {
       <UButton to="?tab=branches" label="Branches" icon="i-lucide-git-branch" color="neutral" :variant="tab === 'branches' ? 'soft' : 'ghost'" />
       <UButton to="?tab=tags" label="Tags" icon="i-lucide-tag" color="neutral" :variant="tab === 'tags' ? 'soft' : 'ghost'" />
       <UButton v-if="canManage" to="?tab=access" label="Access" icon="i-lucide-shield" color="neutral" :variant="tab === 'access' ? 'soft' : 'ghost'" />
-      <UButton v-if="canEdit" to="?tab=settings" label="Settings" icon="i-lucide-settings" color="neutral" :variant="tab === 'settings' ? 'soft' : 'ghost'" />
+      <UButton v-if="canEdit || canDelete" to="?tab=settings" label="Settings" icon="i-lucide-settings" color="neutral" :variant="tab === 'settings' ? 'soft' : 'ghost'" />
     </nav>
 
     <section v-if="tab === 'files'" class="mt-6">
@@ -422,9 +423,9 @@ async function publishDraft() {
       <div class="overflow-hidden rounded-lg border border-default"><div v-for="grant in grants" :key="grant.id" class="grid gap-3 border-b border-default p-4 last:border-b-0 sm:grid-cols-[1fr_12rem_auto] sm:items-center"><div><p class="font-medium text-highlighted">{{ grant.principal_label }}</p><p class="text-sm text-muted">{{ grant.principal_type }}</p></div><USelect :model-value="grant.role" :items="['reader', 'contributor', 'maintainer', 'owner']" @update:model-value="value => changeGrant(grant, value as Role)" /><UButton icon="i-lucide-trash-2" aria-label="Remove grant" color="error" variant="ghost" @click="removeGrant(grant)" /></div><p v-if="!grants.length" class="p-8 text-center text-muted">No explicit grants. Namespace membership may still provide access.</p></div>
     </section>
 
-    <section v-else-if="tab === 'settings' && canEdit" class="mt-6 space-y-6">
-      <UCard><template #header><h2 class="font-medium">Dataset details</h2></template><form class="grid gap-4 sm:grid-cols-2" @submit.prevent="updateDataset"><UFormField label="Name"><UInput v-model="editForm.name" class="w-full" /></UFormField><UFormField label="Slug"><UInput v-model="editForm.slug" class="w-full" /></UFormField><UFormField label="Description" hint="Optional" class="sm:col-span-2"><UTextarea v-model="editForm.description" :maxlength="500" autoresize class="w-full" /></UFormField><div class="flex justify-end sm:col-span-2"><UButton type="submit" label="Save changes" :loading="saving" /></div></form></UCard>
-      <UCard v-if="canManage" class="ring-error/30"><template #header><h2 class="font-medium text-error">Delete dataset</h2></template><p class="mb-4 text-sm text-muted">Type <strong class="font-mono text-highlighted">{{ dataset.namespace_path }}/{{ dataset.slug }}</strong> to permanently delete the repository and its files.</p><div class="flex flex-col gap-3 sm:flex-row"><UInput v-model="deleteConfirmation" class="flex-1" /><UButton label="Delete dataset" color="error" :disabled="deleteConfirmation !== `${dataset.namespace_path}/${dataset.slug}`" :loading="saving" @click="deleteDataset" /></div></UCard>
+    <section v-else-if="tab === 'settings' && (canEdit || canDelete)" class="mt-6 space-y-6">
+      <UCard v-if="canEdit"><template #header><h2 class="font-medium">Dataset details</h2></template><form class="grid gap-4 sm:grid-cols-2" @submit.prevent="updateDataset"><UFormField label="Name"><UInput v-model="editForm.name" class="w-full" /></UFormField><UFormField label="Slug"><UInput v-model="editForm.slug" class="w-full" /></UFormField><UFormField label="Description" hint="Optional" class="sm:col-span-2"><UTextarea v-model="editForm.description" :maxlength="500" autoresize class="w-full" /></UFormField><div class="flex justify-end sm:col-span-2"><UButton type="submit" label="Save changes" :loading="saving" /></div></form></UCard>
+      <UCard v-if="canDelete" class="ring-error/30"><template #header><h2 class="font-medium text-error">Delete dataset</h2></template><p class="mb-4 text-sm text-muted">Type <strong class="font-mono text-highlighted">{{ dataset.namespace_path }}/{{ dataset.slug }}</strong> to permanently delete the repository and its files.</p><div class="flex flex-col gap-3 sm:flex-row"><UInput v-model="deleteConfirmation" class="flex-1" /><UButton label="Delete dataset" color="error" :disabled="deleteConfirmation !== `${dataset.namespace_path}/${dataset.slug}`" :loading="saving" @click="deleteDataset" /></div></UCard>
     </section>
 
     <UModal v-model:open="uploadOpen" title="Stage files for a browser commit" description="Files are staged in a private draft until you explicitly commit them.">

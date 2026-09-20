@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** server, web, CLI, and API maintainers
-- **Last reviewed:** 2026-09-18
+- **Last reviewed:** 2026-09-20
 
 ## Purpose
 
@@ -38,9 +38,9 @@ The full namespace path is derived from ancestor slugs. It is a mutable locator 
 
 ## Django Groups and Niyān Groups
 
-Django's `auth.Group` model is framework-level authorization machinery. Niyān may use it for installation-wide operator or Django-admin permissions, but it must not represent a Niyān group, namespace membership, dataset grant, or repository ACL.
+Django's `auth.Group` model is framework-level authorization machinery. Niyān uses it to assemble installation-wide staff-operator permissions and Django-admin permissions, but it must not represent a Niyān group, namespace membership, dataset grant, or repository ACL.
 
-A Niyān group is a namespace whose kind is `group`; there is no second Niyān model named `Group`. Niyān group membership is stored explicitly as a relationship between a user and a group namespace. Product authorization for REST, Git, Git LFS, and object transfer must use Niyān namespace memberships and dataset grants rather than `user.groups` or Django model permissions.
+A Niyān group is a namespace whose kind is `group`; there is no second Niyān model named `Group`. Niyān group membership is stored explicitly as a relationship between a user and a group namespace. Ordinary resource authorization for REST, Git, Git LFS, and object transfer uses Niyān namespace memberships and dataset grants. The explicit exception is an authenticated staff operator exercising an installation-wide Django model permission through the System surface or the same underlying resource API.
 
 The two systems must not mirror or synchronize membership. Django groups must not be exposed through the Niyān group API, and Niyān group membership must not silently grant Django-admin permissions.
 
@@ -58,7 +58,7 @@ A dataset control-plane record must have:
 
 The pair of namespace and dataset slug must be unique. Dataset UUIDs, rather than mutable namespace paths, must be used for repository storage and durable internal references.
 
-The initial implementation creates private datasets only. Public and installation-visible datasets require an accepted authorization specification before they become selectable behavior.
+The initial implementation creates private datasets only. Public and installation-visible datasets require an accepted authorization specification before they become selectable behavior. Installation-wide staff authority is an operator capability, not a visibility level and not a synthetic Niyān role.
 
 The database record must not store branches, tags, commits, directory entries, or another dataset version identifier. Those belong to Git. Rebuildable indexes may be introduced separately when browsing performance requires them.
 
@@ -88,7 +88,7 @@ The service must reject an existing final repository path rather than adopting o
 
 ## Initial API Boundary
 
-The public API must be versioned under `/api/v1/`. Dataset creation accepts an immutable namespace UUID together with the dataset slug, display name, and optional description of at most 500 characters. A successful response returns the immutable dataset and namespace UUIDs, current namespace path, slug, display name, description, initial default branch, caller's effective role, and creation timestamp.
+The public API must be versioned under `/api/v1/`. Dataset creation accepts an immutable namespace UUID together with the dataset slug, display name, and optional description of at most 500 characters. A successful response returns the immutable dataset and namespace UUIDs, current namespace path, slug, display name, description, initial default branch, caller's Niyān role when one exists, explicit write, update, access-management, and deletion capability booleans, and creation timestamp. The capability booleans are authoritative for user-interface actions because staff model permissions do not masquerade as Niyān roles.
 
 The endpoint must require an authenticated user and call the domain service rather than performing Git or filesystem work directly. Dataset creation is allowed in the caller's personal namespace or a group where the caller has at least maintainer access. Scoped tokens, visibility rules, and protected-ref policy are defined by their focused specifications.
 

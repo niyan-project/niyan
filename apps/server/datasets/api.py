@@ -13,7 +13,7 @@ from pydantic import model_validator
 from accounts.authentication import get_access_token, require_access, session_or_access_token
 from accounts.models import AccessToken
 from datasets.models import DatasetGrant, ProtectedRefRule
-from datasets.policies import get_dataset_role
+from datasets.policies import can_delete_dataset, can_manage_dataset_grants, can_update_dataset, can_write_repository, get_dataset_product_role
 from datasets.repositories import RepositoryDeletionError, RepositoryProvisioningError
 from datasets.selectors import get_deletable_dataset, get_grant_manageable_dataset, get_protected_ref_manageable_dataset, get_visible_dataset, list_visible_datasets, list_visible_namespace_datasets, resolve_visible_dataset_path
 from datasets.services import DatasetObjectDeletionError, DatasetPathConflict, create_dataset, create_dataset_grant, create_protected_ref_rule, delete_dataset, delete_dataset_grant, delete_protected_ref_rule, update_dataset, update_dataset_grant, update_protected_ref_rule
@@ -40,7 +40,11 @@ class DatasetResponse(Schema):
     name: str
     description: str
     default_branch: str
-    role: str
+    role: str | None
+    can_write: bool
+    can_update: bool
+    can_manage_access: bool
+    can_delete: bool
     created_at: datetime
 
 
@@ -224,7 +228,11 @@ def serialize_dataset(dataset, *, user):
         'name': dataset.name,
         'description': dataset.description,
         'default_branch': 'main',
-        'role': get_dataset_role(user=user, dataset=dataset),
+        'role': get_dataset_product_role(user=user, dataset=dataset),
+        'can_write': can_write_repository(user=user, dataset=dataset),
+        'can_update': can_update_dataset(user=user, dataset=dataset),
+        'can_manage_access': can_manage_dataset_grants(user=user, dataset=dataset),
+        'can_delete': can_delete_dataset(user=user, dataset=dataset),
         'created_at': dataset.created_at,
     }
 

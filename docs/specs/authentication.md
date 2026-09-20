@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Audience:** server, web, CLI, Python client, and deployment maintainers
-- **Last reviewed:** 2026-09-18
+- **Last reviewed:** 2026-09-20
 
 ## Purpose
 
@@ -131,7 +131,7 @@ The versioned REST API provides the following authentication operations:
 
 Token-management and device-approval operations require a browser-authenticated session, except that an active bearer token may revoke itself. Device initiation and polling are unauthenticated but rate-limited. Polling distinguishes pending, denied, expired, and successful authorization without revealing user information before success.
 
-There is no public registration endpoint in v1. An installation administrator creates the initial superuser and provisions additional accounts through Django admin.
+There is no public registration endpoint in v1. An installation administrator creates the initial superuser out of band. A staff user with `accounts.view_user` may list installation accounts through the browser-session-only System API, and one with `accounts.add_user` may provision an active, non-staff account. Provisioning validates the installation password policy and atomically creates the account's personal namespace. Staff status, superuser status, Django auth-group membership, and account deletion remain Django-admin operations in v1.
 
 The access-token secret returned by manual creation or device exchange is never returned again. Token listing and current-credential inspection return only metadata and a non-secret fingerprint.
 

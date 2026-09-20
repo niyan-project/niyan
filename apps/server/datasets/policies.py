@@ -13,6 +13,25 @@ ROLE_LEVELS = {
 }
 
 
+def has_staff_permission(*, user, permission):
+    """Return whether an active staff user has one Django model permission.
+
+    Parameters
+    ----------
+    user : accounts.models.User
+        Authenticated user whose installation-wide authority is evaluated.
+    permission : str
+        Fully qualified Django permission name.
+
+    Returns
+    -------
+    bool
+        Whether the user may exercise the permission through Niyān.
+    """
+
+    return user.is_authenticated and user.is_staff and user.has_perm(permission)
+
+
 def get_namespace_role(*, user, namespace):
     """Return a user's highest role inherited into a namespace.
 
@@ -64,6 +83,22 @@ def get_dataset_role(*, user, dataset):
         return NamespaceMembership.Role.OWNER
 
     roles = []
+    if has_staff_permission(user=user, permission='datasets.delete_dataset'):
+        roles.append(NamespaceMembership.Role.OWNER)
+    elif has_staff_permission(user=user, permission='datasets.change_dataset'):
+        roles.append(NamespaceMembership.Role.MAINTAINER)
+    elif has_staff_permission(user=user, permission='datasets.view_dataset'):
+        roles.append(NamespaceMembership.Role.READER)
+    product_role = get_dataset_product_role(user=user, dataset=dataset)
+    if product_role is not None:
+        roles.append(product_role)
+    return _highest_role(roles)
+
+
+def get_dataset_product_role(*, user, dataset):
+    """Return the highest role granted through Niyān ownership and grants."""
+
+    roles = []
     namespace_role = get_namespace_role(user=user, namespace=dataset.namespace)
     if namespace_role is not None:
         roles.append(namespace_role)
@@ -82,6 +117,11 @@ def get_dataset_role(*, user, dataset):
 def can_view_namespace(*, user, namespace):
     """Return whether a namespace is visible to a user."""
 
+    if any(
+        has_staff_permission(user=user, permission=permission)
+        for permission in ('namespaces.view_namespace', 'namespaces.add_namespace', 'namespaces.change_namespace', 'namespaces.delete_namespace', 'datasets.add_dataset')
+    ):
+        return True
     if get_namespace_role(user=user, namespace=namespace) is not None:
         return True
     return any(can_read_dataset(user=user, dataset=dataset) for dataset in namespace.datasets.select_related('namespace__parent').all())
@@ -90,7 +130,7 @@ def can_view_namespace(*, user, namespace):
 def can_create_dataset(*, user, namespace):
     """Return whether a user may create datasets in a namespace."""
 
-    return _at_least(get_namespace_role(user=user, namespace=namespace), NamespaceMembership.Role.MAINTAINER)
+    return has_staff_permission(user=user, permission='datasets.add_dataset') or _at_least(get_namespace_role(user=user, namespace=namespace), NamespaceMembership.Role.MAINTAINER)
 
 
 def can_create_group(*, user, parent=None):
@@ -98,6 +138,8 @@ def can_create_group(*, user, parent=None):
 
     if not user.is_authenticated:
         return False
+    if has_staff_permission(user=user, permission='namespaces.add_namespace'):
+        return True
     if parent is None:
         return True
     return _at_least(get_namespace_role(user=user, namespace=parent), NamespaceMembership.Role.OWNER)
@@ -106,37 +148,46 @@ def can_create_group(*, user, parent=None):
 def can_manage_group(*, user, namespace):
     """Return whether a user may update a group and its direct members."""
 
-    return namespace.kind == Namespace.Kind.GROUP and _at_least(get_namespace_role(user=user, namespace=namespace), NamespaceMembership.Role.OWNER)
+    return namespace.kind == Namespace.Kind.GROUP and (has_staff_permission(user=user, permission='namespaces.change_namespace') or _at_least(get_namespace_role(user=user, namespace=namespace), NamespaceMembership.Role.OWNER))
+
+
+def can_delete_group(*, user, namespace):
+    """Return whether a user may permanently delete a group."""
+
+    return namespace.kind == Namespace.Kind.GROUP and (has_staff_permission(user=user, permission='namespaces.delete_namespace') or _at_least(get_namespace_role(user=user, namespace=namespace), NamespaceMembership.Role.OWNER))
 
 
 def can_read_dataset(*, user, dataset):
     """Return whether a user may view metadata and repository content."""
 
-    return _at_least(get_dataset_role(user=user, dataset=dataset), NamespaceMembership.Role.READER)
+    return any(
+        has_staff_permission(user=user, permission=permission)
+        for permission in ('datasets.view_dataset', 'datasets.change_dataset', 'datasets.delete_dataset')
+    ) or _at_least(get_dataset_product_role(user=user, dataset=dataset), NamespaceMembership.Role.READER)
 
 
 def can_write_repository(*, user, dataset):
     """Return whether a user may push ordinary repository updates."""
 
-    return _at_least(get_dataset_role(user=user, dataset=dataset), NamespaceMembership.Role.CONTRIBUTOR)
+    return has_staff_permission(user=user, permission='datasets.change_dataset') or _at_least(get_dataset_product_role(user=user, dataset=dataset), NamespaceMembership.Role.CONTRIBUTOR)
 
 
 def can_update_dataset(*, user, dataset):
     """Return whether a user may change dataset metadata."""
 
-    return _at_least(get_dataset_role(user=user, dataset=dataset), NamespaceMembership.Role.MAINTAINER)
+    return has_staff_permission(user=user, permission='datasets.change_dataset') or _at_least(get_dataset_product_role(user=user, dataset=dataset), NamespaceMembership.Role.MAINTAINER)
 
 
 def can_manage_dataset_grants(*, user, dataset):
     """Return whether a user may administer dataset principals."""
 
-    return _at_least(get_dataset_role(user=user, dataset=dataset), NamespaceMembership.Role.OWNER)
+    return has_staff_permission(user=user, permission='datasets.change_dataset') or _at_least(get_dataset_product_role(user=user, dataset=dataset), NamespaceMembership.Role.OWNER)
 
 
 def can_manage_protected_refs(*, user, dataset):
     """Return whether a user may configure stricter ref-mutation rules."""
 
-    return _at_least(get_dataset_role(user=user, dataset=dataset), NamespaceMembership.Role.MAINTAINER)
+    return has_staff_permission(user=user, permission='datasets.change_dataset') or _at_least(get_dataset_product_role(user=user, dataset=dataset), NamespaceMembership.Role.MAINTAINER)
 
 
 def required_protected_ref_role(*, rules, kind, short_name, deleting):
@@ -149,7 +200,7 @@ def required_protected_ref_role(*, rules, kind, short_name, deleting):
 def can_delete_dataset(*, user, dataset):
     """Return whether a user may permanently delete a dataset."""
 
-    return _at_least(get_dataset_role(user=user, dataset=dataset), NamespaceMembership.Role.OWNER)
+    return has_staff_permission(user=user, permission='datasets.delete_dataset') or _at_least(get_dataset_product_role(user=user, dataset=dataset), NamespaceMembership.Role.OWNER)
 
 
 def _at_least(role, required_role):

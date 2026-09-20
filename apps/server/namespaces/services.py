@@ -4,7 +4,7 @@ from django.db import IntegrityError, transaction
 from accounts.validators import normalize_path_slug
 from datasets.audit import record_audit_event
 from datasets.models import AuditEvent
-from datasets.policies import can_create_group, can_manage_group
+from datasets.policies import can_create_group, can_delete_group, can_manage_group
 from namespaces.models import Namespace, NamespaceMembership
 
 
@@ -148,7 +148,7 @@ def delete_group(*, group, deleted_by):
 
     with transaction.atomic():
         locked_group = Namespace.objects.select_for_update().get(pk=group.pk, kind=Namespace.Kind.GROUP)
-        if not can_manage_group(user=deleted_by, namespace=locked_group):
+        if not can_delete_group(user=deleted_by, namespace=locked_group):
             raise PermissionDenied('You cannot delete this group.')
         if locked_group.children.exists() or locked_group.datasets.exists():
             raise GroupNotEmpty('A group containing groups or datasets cannot be deleted.')

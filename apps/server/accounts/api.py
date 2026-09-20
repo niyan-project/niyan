@@ -16,6 +16,7 @@ from ninja.throttling import AnonRateThrottle, UserRateThrottle
 
 from accounts.authentication import get_access_token, session_or_access_token
 from accounts.models import AccessToken, DeviceAuthorization
+from accounts.permissions import get_system_permissions
 from accounts.tokens import (
     DeviceAuthorizationDenied,
     DeviceAuthorizationExpired,
@@ -87,7 +88,9 @@ class CurrentUserResponse(Schema):
     username: str
     display_name: str
     email: str
+    is_staff: bool
     is_superuser: bool
+    system_permissions: list[str]
     authentication_method: str
     access_token: AccessTokenMetadataResponse | None
 
@@ -262,7 +265,9 @@ def serialize_current_user(user, *, authentication_method='session', access_toke
         'username': user.username,
         'display_name': user.get_full_name().strip() or user.username,
         'email': user.email,
+        'is_staff': user.is_staff,
         'is_superuser': user.is_superuser,
+        'system_permissions': get_system_permissions(user),
         'authentication_method': authentication_method,
         'access_token': serialize_access_token(access_token) if access_token is not None else None,
     }

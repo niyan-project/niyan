@@ -2,13 +2,13 @@
 
 - **Status:** Accepted
 - **Audience:** server, web, CLI, Python client, and deployment maintainers
-- **Last reviewed:** 2026-09-18
+- **Last reviewed:** 2026-09-20
 
 ## Purpose
 
 This specification defines one authorization policy shared by REST, Git, Git LFS, repository browsing, and future object-transfer endpoints. HTTP handlers and storage adapters must ask this policy for decisions rather than infer access from namespace shape themselves.
 
-Authentication identifies a user and may impose token scopes and a token resource boundary. Authorization then evaluates the user's current Niyān roles. Effective access is the intersection of both layers.
+Authentication identifies a user and may impose token scopes and a token resource boundary. Ordinary authorization then evaluates the user's current Niyān roles. Effective access is the intersection of both layers. Separately, staff operators may receive installation-wide authority from Django model permissions assigned directly or through Django auth groups; the System administration endpoints themselves require a browser session.
 
 ## Principals and Roles
 
@@ -70,9 +70,24 @@ The server exposes explicit policy operations for:
 
 Domain services remain responsible for enforcing the relevant policy inside their transaction. Selectors may use the same policy to avoid returning inaccessible objects, but a selector is not a substitute for authorization at mutation time.
 
-Django superusers may bypass Niyān product policy for installation recovery and administration. Staff status and Django model permissions alone do not grant product access.
+Django superusers may bypass Niyān product policy for installation recovery and administration. A non-staff user never gains product authority from Django model permissions. A staff user may exercise only the following explicitly mapped installation-wide permissions:
 
-Any authenticated user may create a root group. Only an effective owner of a group may create a child group beneath it or manage that group's identity and direct memberships. These capabilities do not grant Django-admin access and must never be evaluated through Django auth-group membership.
+| Django model permission | Niyān system authority |
+| --- | --- |
+| `accounts.view_user` | List installation users |
+| `accounts.add_user` | Provision an active, non-staff user and personal namespace |
+| `namespaces.view_namespace` | Discover and view all groups |
+| `namespaces.add_namespace` | Create groups anywhere in the hierarchy |
+| `namespaces.change_namespace` | Rename groups and manage direct memberships |
+| `namespaces.delete_namespace` | Permanently delete empty groups |
+| `datasets.view_dataset` | Discover, browse, clone, fetch, and download all datasets |
+| `datasets.add_dataset` | Create datasets in any namespace |
+| `datasets.change_dataset` | Change metadata, push repository refs, and manage grants and protected-ref rules |
+| `datasets.delete_dataset` | Permanently delete datasets |
+
+These permissions augment rather than replace ordinary Niyān roles. They are evaluated by the same server policy used by REST, Git, Git LFS, browsing, and transfer authorization; hiding a System navigation item is never the authorization boundary. Access-token authentication does not expose the staff-only System API, although Git and data operations performed with a user's access token still evaluate that user's current resource authority and the token's scope and resource boundary.
+
+Any authenticated user may create a root group. In ordinary collaboration, only an effective owner of a group may create a child group beneath it or manage that group's identity and direct memberships. A staff operator may instead perform the precisely mapped installation-wide operation above. Niyān roles do not grant Django-admin access, and staff authority must never be materialized as a namespace membership or dataset grant.
 
 ## Initial Grant API
 

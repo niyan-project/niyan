@@ -129,16 +129,16 @@ async function deleteGroup() {
         <h1 class="mt-1 text-2xl font-medium text-highlighted">{{ group.name }}</h1>
         <p class="mt-2 text-muted">{{ group.kind === 'personal' ? 'Your personal datasets.' : 'A Niyān group for people and datasets.' }}</p>
       </div>
-      <div v-if="group.can_create_dataset" class="flex flex-wrap gap-2">
-        <UButton v-if="group.kind === 'group' && group.can_manage" label="New subgroup" icon="i-lucide-users-round" color="neutral" variant="outline" @click="showChildForm = !showChildForm" />
-        <UButton label="New dataset" icon="i-lucide-plus" @click="showDatasetForm = !showDatasetForm" />
+      <div v-if="group.can_create_group || group.can_create_dataset" class="flex flex-wrap gap-2">
+        <UButton v-if="group.can_create_group" label="New subgroup" icon="i-lucide-users-round" color="neutral" variant="outline" @click="showChildForm = !showChildForm" />
+        <UButton v-if="group.can_create_dataset" label="New dataset" icon="i-lucide-plus" @click="showDatasetForm = !showDatasetForm" />
       </div>
     </div>
 
     <nav class="mt-6 flex gap-1 border-b border-default" aria-label="Group sections">
       <UButton to="?tab=datasets" label="Datasets" icon="i-lucide-database" color="neutral" :variant="tab === 'datasets' ? 'soft' : 'ghost'" />
       <UButton v-if="group.kind === 'group' && group.can_manage" to="?tab=members" label="Members" icon="i-lucide-user-round-cog" color="neutral" :variant="tab === 'members' ? 'soft' : 'ghost'" />
-      <UButton v-if="group.kind === 'group' && group.can_manage" to="?tab=settings" label="Settings" icon="i-lucide-settings" color="neutral" :variant="tab === 'settings' ? 'soft' : 'ghost'" />
+      <UButton v-if="group.kind === 'group' && (group.can_manage || group.can_delete)" to="?tab=settings" label="Settings" icon="i-lucide-settings" color="neutral" :variant="tab === 'settings' ? 'soft' : 'ghost'" />
     </nav>
 
     <UCard v-if="showChildForm" class="mt-6">
@@ -169,7 +169,7 @@ async function deleteGroup() {
       <div>
         <h2 class="mb-3 font-medium text-highlighted">Datasets</h2>
         <div class="overflow-hidden rounded-lg border border-default">
-          <NuxtLink v-for="dataset in datasets" :key="dataset.id" :to="`/${dataset.namespace_path}/${dataset.slug}`" class="flex items-center justify-between gap-4 border-b border-default p-4 last:border-b-0 hover:bg-elevated"><div><p class="font-medium text-highlighted">{{ dataset.name }}</p><p class="mt-1 font-mono text-sm text-muted">{{ dataset.slug }}</p><p v-if="dataset.description" class="mt-2 text-sm text-muted">{{ dataset.description }}</p></div><UBadge color="neutral" variant="subtle">{{ dataset.role }}</UBadge></NuxtLink>
+          <NuxtLink v-for="dataset in datasets" :key="dataset.id" :to="`/${dataset.namespace_path}/${dataset.slug}`" class="flex items-center justify-between gap-4 border-b border-default p-4 last:border-b-0 hover:bg-elevated"><div><p class="font-medium text-highlighted">{{ dataset.name }}</p><p class="mt-1 font-mono text-sm text-muted">{{ dataset.slug }}</p><p v-if="dataset.description" class="mt-2 text-sm text-muted">{{ dataset.description }}</p></div><UBadge color="neutral" variant="subtle">{{ dataset.role || 'system' }}</UBadge></NuxtLink>
           <p v-if="!datasets.length" class="p-8 text-center text-muted">This {{ group.kind === 'group' ? 'group' : 'account' }} has no visible datasets.</p>
         </div>
       </div>
@@ -197,8 +197,8 @@ async function deleteGroup() {
       </div>
     </section>
 
-    <section v-else-if="tab === 'settings' && group.can_manage" class="mt-6 space-y-6">
-      <UCard>
+    <section v-else-if="tab === 'settings' && (group.can_manage || group.can_delete)" class="mt-6 space-y-6">
+      <UCard v-if="group.can_manage">
         <template #header><h2 class="font-medium text-highlighted">Group details</h2></template>
         <form class="grid gap-4 sm:grid-cols-2" @submit.prevent="updateGroup">
           <UFormField label="Name"><UInput v-model="editForm.name" class="w-full" /></UFormField>
@@ -206,7 +206,7 @@ async function deleteGroup() {
           <div class="flex justify-end sm:col-span-2"><UButton type="submit" label="Save changes" :loading="saving" /></div>
         </form>
       </UCard>
-      <UCard class="ring-error/30">
+      <UCard v-if="group.can_delete" class="ring-error/30">
         <template #header><h2 class="font-medium text-error">Delete group</h2></template>
         <p class="mb-4 text-sm text-muted">The group must be empty. Type <strong class="font-mono text-highlighted">{{ group.path }}</strong> to confirm irreversible deletion.</p>
         <div class="flex flex-col gap-3 sm:flex-row"><UInput v-model="deleteConfirmation" class="flex-1" /><UButton label="Delete group" color="error" :disabled="deleteConfirmation !== group.path" :loading="saving" @click="deleteGroup" /></div>

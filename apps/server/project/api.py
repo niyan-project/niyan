@@ -2,6 +2,7 @@ from ninja import NinjaAPI, Schema
 from ninja.errors import AuthenticationError, AuthorizationError, Throttled, ValidationError
 
 from accounts.api import router as authentication_router
+from accounts.system_api import router as system_router
 from datasets.api import router as datasets_router
 from datasets.audit_api import account_router as account_audit_router
 from datasets.audit_api import dataset_router as dataset_audit_router
@@ -15,6 +16,7 @@ from namespaces.api import router as namespaces_router
 api = NinjaAPI(title='Niyān API', version='1.0.0', urls_namespace='api-v1')
 api.add_router('/auth', authentication_router)
 api.add_router('/auth', account_audit_router)
+api.add_router('/system', system_router)
 api.add_router('/datasets', datasets_router)
 api.add_router('/datasets', dataset_audit_router)
 api.add_router('/datasets', browser_commit_router)

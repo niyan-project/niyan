@@ -9,9 +9,9 @@ from ninja import Field, Query, Router, Schema, Status
 from pydantic import model_validator
 
 from accounts.authentication import require_access, session_or_access_token
-from datasets.policies import can_create_dataset, can_manage_group, get_namespace_role
+from datasets.policies import can_create_dataset, can_create_group, can_delete_group, can_manage_group, get_namespace_role
 from namespaces.models import Namespace
-from namespaces.selectors import get_manageable_group, get_visible_namespace, get_visible_namespace_by_path, list_visible_namespaces
+from namespaces.selectors import get_deletable_group, get_manageable_group, get_visible_namespace, get_visible_namespace_by_path, list_visible_namespaces
 from namespaces.services import GroupNotEmpty, GroupPathConflict, LastGroupOwner, create_group, create_group_membership, delete_group, delete_group_membership, update_group, update_group_membership
 
 
@@ -36,7 +36,9 @@ class NamespaceResponse(Schema):
     kind: str
     role: str | None
     can_create_dataset: bool
+    can_create_group: bool
     can_manage: bool
+    can_delete: bool
     created_at: datetime
     updated_at: datetime
 
@@ -130,7 +132,9 @@ def serialize_namespace(namespace, *, user):
         'kind': namespace.kind,
         'role': role,
         'can_create_dataset': can_create_dataset(user=user, namespace=namespace),
+        'can_create_group': namespace.kind == Namespace.Kind.GROUP and can_create_group(user=user, parent=namespace),
         'can_manage': can_manage_group(user=user, namespace=namespace),
+        'can_delete': can_delete_group(user=user, namespace=namespace),
         'created_at': namespace.created_at,
         'updated_at': namespace.updated_at,
     }
@@ -227,7 +231,7 @@ def delete_group_endpoint(request, namespace_id: UUID):
     """Permanently delete one empty owner-managed group."""
 
     require_access(request=request, scope='api')
-    group = get_manageable_group(namespace_id=namespace_id, user=request.auth)
+    group = get_deletable_group(namespace_id=namespace_id, user=request.auth)
     if group is None:
         return Status(404, {'code': 'group_not_found', 'detail': 'The requested group does not exist.'})
     try:

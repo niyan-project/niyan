@@ -20,7 +20,9 @@ const group: Namespace = {
   kind: 'group',
   role: 'owner',
   can_create_dataset: true,
+  can_create_group: true,
   can_manage: true,
+  can_delete: true,
   created_at: '2030-01-01T00:00:00Z',
   updated_at: '2030-01-01T00:00:00Z'
 }

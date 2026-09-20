@@ -19,6 +19,10 @@ const dataset: Dataset = {
   description: 'Microscopy images',
   default_branch: 'main',
   role: 'owner',
+  can_write: true,
+  can_update: true,
+  can_manage_access: true,
+  can_delete: true,
   created_at: '2030-01-01T00:00:00Z'
 }
 
@@ -112,7 +116,7 @@ describe('dataset repository view', () => {
       if (url.includes('refs?kind=branches')) return Promise.resolve({ items: [{ name: 'main' }] })
       if (url.includes('refs?kind=tags')) return Promise.resolve({ items: [] })
       if (url.endsWith('/grants')) return Promise.resolve({ count: 0, items: [] })
-      if (url === '/api/v1/namespaces?limit=100') return Promise.resolve({ items: [{ id: 'group-id', parent_id: null, parent_path: null, path: 'research/vision', slug: 'vision', name: 'Vision', kind: 'group', role: 'owner', can_create_dataset: true, can_manage: true, created_at: '2030-01-01T00:00:00Z', updated_at: '2030-01-01T00:00:00Z' }] })
+      if (url === '/api/v1/namespaces?limit=100') return Promise.resolve({ items: [{ id: 'group-id', parent_id: null, parent_path: null, path: 'research/vision', slug: 'vision', name: 'Vision', kind: 'group', role: 'owner', can_create_dataset: true, can_create_group: true, can_manage: true, can_delete: true, created_at: '2030-01-01T00:00:00Z', updated_at: '2030-01-01T00:00:00Z' }] })
       if (url.includes('/api/v1/auth/users?')) return Promise.resolve({ items: [{ id: 7, username: 'colleague', display_name: 'Colleague' }] })
       throw new Error(`Unexpected GET ${url}`)
     })

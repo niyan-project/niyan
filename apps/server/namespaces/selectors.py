@@ -1,4 +1,4 @@
-from datasets.policies import can_manage_group, can_view_namespace
+from datasets.policies import can_delete_group, can_manage_group, can_view_namespace
 from namespaces.models import Namespace
 
 
@@ -45,6 +45,15 @@ def get_manageable_group(*, namespace_id, user):
 
     namespace = Namespace.objects.select_related('parent').filter(pk=namespace_id, kind=Namespace.Kind.GROUP).first()
     if namespace is None or not can_manage_group(user=user, namespace=namespace):
+        return None
+    return namespace
+
+
+def get_deletable_group(*, namespace_id, user):
+    """Return one group only when the user may permanently delete it."""
+
+    namespace = Namespace.objects.select_related('parent').filter(pk=namespace_id, kind=Namespace.Kind.GROUP).first()
+    if namespace is None or not can_delete_group(user=user, namespace=namespace):
         return None
     return namespace
 

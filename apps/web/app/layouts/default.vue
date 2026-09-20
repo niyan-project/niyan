@@ -1,10 +1,14 @@
 <script setup lang="ts">
-const { signOut } = useAuth()
+const { user, signOut } = useAuth()
 const route = useRoute()
-const navigation = computed(() => [
-  { label: 'Datasets', to: '/', icon: 'i-lucide-database', active: route.path === '/' && route.query.view !== 'groups' },
-  { label: 'Groups', to: '/?view=groups', icon: 'i-lucide-users-round', active: route.path === '/' && route.query.view === 'groups' }
-])
+const navigation = computed(() => {
+  const items = [
+    { label: 'Datasets', to: '/', icon: 'i-lucide-database', active: route.path === '/' && route.query.view !== 'groups' },
+    { label: 'Groups', to: '/?view=groups', icon: 'i-lucide-users-round', active: route.path === '/' && route.query.view === 'groups' }
+  ]
+  if (user.value?.system_permissions?.length) items.push({ label: 'System', to: '/system', icon: 'i-lucide-server-cog', active: route.path.startsWith('/system') })
+  return items
+})
 const userMenu = [
   [{ label: 'Settings', to: '/settings', icon: 'i-lucide-settings' }],
   [{ label: 'Log out', icon: 'i-lucide-log-out', onSelect: () => signOut() }]

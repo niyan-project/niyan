@@ -81,6 +81,10 @@ class DatasetApiTests(TestCase):
                 'description': 'Training and validation images.',
                 'default_branch': 'main',
                 'role': 'owner',
+                'can_write': True,
+                'can_update': True,
+                'can_manage_access': True,
+                'can_delete': True,
             },
         )
         self.assertLess(abs(parse_datetime(body['created_at']) - dataset.created_at), timedelta(milliseconds=1))
