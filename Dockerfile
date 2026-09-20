@@ -29,7 +29,7 @@ COPY apps/server/ ./
 COPY --from=web-builder /build/apps/web/.output/public/ /opt/niyan/web/
 
 RUN mkdir -p /var/lib/niyan/repositories /opt/niyan/server/staticfiles \
-    && NIYAN_SECRET_KEY=container-build-only-not-used-at-runtime NIYAN_DEBUG=false NIYAN_DATABASE_URL=sqlite:///:memory: NIYAN_S3_BUCKET=container-build uv run python manage.py collectstatic --noinput \
+    && NIYAN_SECRET_KEY=container-build-only-not-used-at-runtime NIYAN_DEBUG=false NIYAN_DATABASE_URL=postgresql://niyan:unused@database.invalid:5432/niyan NIYAN_S3_BUCKET=container-build uv run python manage.py collectstatic --noinput \
     && addgroup --system --gid 10001 niyan \
     && adduser --system --uid 10001 --ingroup niyan --home /var/lib/niyan niyan \
     && chown -R niyan:niyan /var/lib/niyan /opt/niyan/server/staticfiles

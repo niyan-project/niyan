@@ -19,28 +19,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_DB: niyan
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d niyan"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
-      PGPASSWORD: postgres
-      NIYAN_SECRET_KEY: ci-only-secret-key
-      NIYAN_DEBUG: "true"
-      NIYAN_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
-      NIYAN_DATABASE_URL: postgresql://niyan:niyan@127.0.0.1:5432/niyan
-      NIYAN_TEST_DATABASE_NAME: niyan_test
-      NIYAN_GIT_ROOT: /tmp/niyan-git
-      NIYAN_S3_BUCKET: ci-only
       AWS_EC2_METADATA_DISABLED: "true"
     steps:
       - uses: actions/checkout@v7
@@ -56,27 +35,8 @@ jobs:
       - name: Install server dependencies
         working-directory: apps/server
         run: uv sync --frozen
-      - name: Create least-privilege application databases
-        run: |
-          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE niyan LOGIN PASSWORD 'niyan' NOSUPERUSER NOCREATEDB NOCREATEROLE;"
-          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE niyan_test;"
-          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE niyan TO niyan;"
-          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE niyan_test TO niyan;"
-          psql -h 127.0.0.1 -U postgres -d niyan -v ON_ERROR_STOP=1 -c "GRANT USAGE, CREATE ON SCHEMA public TO niyan;"
-          psql -h 127.0.0.1 -U postgres -d niyan_test -v ON_ERROR_STOP=1 -c "GRANT USAGE, CREATE ON SCHEMA public TO niyan;"
-          mkdir -p "$NIYAN_GIT_ROOT"
-      - name: Check migrations
-        working-directory: apps/server
-        run: .venv/bin/python manage.py makemigrations --check --dry-run
       - name: Run server and cross-component tests
-        working-directory: apps/server
-        run: .venv/bin/coverage run manage.py test --keepdb
-      - name: Generate server coverage reports
-        working-directory: apps/server
-        run: |
-          .venv/bin/coverage report --fail-under=85
-          .venv/bin/coverage xml
-          .venv/bin/coverage html
+        run: ./apps/server/test
       - name: Publish server coverage to Codecov
         uses: codecov/codecov-action@v7.1.1
         with:
@@ -197,7 +157,7 @@ jobs:
             -e NIYAN_DEBUG=false \
             -e NIYAN_ALLOWED_HOSTS=niyan.example.org \
             -e NIYAN_CSRF_TRUSTED_ORIGINS=https://niyan.example.org \
-            -e NIYAN_DATABASE_URL=sqlite:///:memory: \
+            -e NIYAN_DATABASE_URL=postgresql://niyan:unused@database.invalid:5432/niyan \
             -e NIYAN_S3_BUCKET=ci-only \
             -e NIYAN_SECURE_HSTS_INCLUDE_SUBDOMAINS=true \
             -e NIYAN_SECURE_HSTS_PRELOAD=true \

@@ -104,12 +104,13 @@ WSGI_APPLICATION = 'project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+database_configuration = env.db('NIYAN_DATABASE_URL')
+if database_configuration['ENGINE'] != 'django.db.backends.postgresql':
+    raise ImproperlyConfigured('NIYAN_DATABASE_URL must use PostgreSQL.')
+
 DATABASES = {
-    'default': env.db('NIYAN_DATABASE_URL'),
+    'default': database_configuration,
 }
-test_database_name = env('NIYAN_TEST_DATABASE_NAME', default=None)
-if test_database_name:
-    DATABASES['default'].setdefault('TEST', {})['NAME'] = test_database_name
 
 REPOSITORIES_ROOT = Path(env('NIYAN_GIT_ROOT')).expanduser()
 

@@ -21,7 +21,7 @@ The initial server audit identified the largest important gaps in browser commit
 
 The initial client audit identified the largest important gaps in HTTP error handling, CLI dispatch, credential-store failures, project dependency handling, fsspec metadata and ranged reads, Git and Git LFS delegation, multipart interruption, cache safety, and atomic download recovery.
 
-Tests for these areas should assert externally meaningful results and failure behavior. Prefer real Git, Git LFS, PostgreSQL, and HTTP boundaries or faithful storage doubles where their semantics are the subject of the test. A test that merely imports a module or executes a line without validating behavior does not satisfy this policy.
+Tests for these areas should assert externally meaningful results and failure behavior. Server tests always run against PostgreSQL, including local development through the ephemeral Docker Compose test service; SQLite is not an accepted substitute. Prefer real Git, Git LFS, PostgreSQL, and HTTP boundaries or faithful storage doubles where their semantics are the subject of the test. A test that merely imports a module or executes a line without validating behavior does not satisfy this policy.
 
 ## Exclusions
 
