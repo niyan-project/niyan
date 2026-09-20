@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { SystemUser, SystemUserList } from '~/types/api'
 import { NiyanApiError } from '~/composables/useApi'
+import { generateRandomPassword } from '~/utils/password'
 
 definePageMeta({ middleware: 'system' })
 useHead({ title: 'System users' })
@@ -19,6 +20,14 @@ const { data: page, error, refresh } = await useAsyncData('system-users', async 
 const users = computed(() => page.value?.items || [])
 const errorMessage = computed(() => error.value instanceof NiyanApiError ? error.value.message : error.value ? 'Users could not be loaded.' : '')
 const { formatRelative } = useFormatting()
+
+function fillRandomPassword() {
+  try {
+    form.password = generateRandomPassword()
+  } catch (generationError) {
+    toast.add({ title: 'Could not generate password', description: generationError instanceof Error ? generationError.message : undefined, color: 'error' })
+  }
+}
 
 async function createUser() {
   saving.value = true
@@ -47,7 +56,12 @@ async function createUser() {
       <template #header><div><h2 class="font-medium text-highlighted">Create user</h2><p class="mt-1 text-sm text-muted">The username also becomes the account's personal namespace path.</p></div></template>
       <form class="grid gap-4 sm:grid-cols-2" @submit.prevent="createUser">
         <UFormField label="Username" required><UInput v-model="form.username" autocomplete="off" class="w-full" /></UFormField>
-        <UFormField label="Initial password" required><UInput v-model="form.password" type="password" autocomplete="new-password" class="w-full" /></UFormField>
+        <UFormField label="Initial password" required>
+          <div class="grid gap-2">
+            <UInput v-model="form.password" type="password" autocomplete="new-password" class="w-full" />
+            <UButton type="button" label="Generate random password" icon="i-lucide-dices" color="neutral" variant="soft" class="justify-center" @click="fillRandomPassword" />
+          </div>
+        </UFormField>
         <UFormField label="First name"><UInput v-model="form.first_name" autocomplete="off" class="w-full" /></UFormField>
         <UFormField label="Last name"><UInput v-model="form.last_name" autocomplete="off" class="w-full" /></UFormField>
         <UFormField label="Email" class="sm:col-span-2"><UInput v-model="form.email" type="email" autocomplete="off" class="w-full" /></UFormField>

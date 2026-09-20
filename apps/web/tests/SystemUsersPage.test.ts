@@ -63,4 +63,22 @@ describe('system users page', () => {
       last_name: ''
     })
   })
+
+  it('generates a strong editable password in the browser', async () => {
+    const wrapper = await mountSuspended(SystemUsersPage, { route: '/system/users' })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('New user'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('Generate random password'))!.trigger('click')
+
+    const password = wrapper.findAll('input')[1]!.element.value
+    expect(password).toHaveLength(24)
+    expect(password).toMatch(/[A-Z]/)
+    expect(password).toMatch(/[a-z]/)
+    expect(password).toMatch(/[0-9]/)
+    expect(password).toMatch(/[!@#$%^&*()\-_=+]/)
+
+    await wrapper.findAll('input')[1]!.setValue(`${password}x`)
+    expect(wrapper.findAll('input')[1]!.element.value).toBe(`${password}x`)
+  })
 })
