@@ -126,3 +126,22 @@ Do not run migrations concurrently from every application replica. Do not assume
 - **Lost Django secret key:** restore it from secret backup when possible. Replacing it invalidates sessions and may invalidate other Django-signed values, but it does not replace database, Git, or S3 recovery.
 
 Test recovery on a schedule appropriate to the installation. At minimum, measure how long it takes to restore all three stores, validate an LFS-backed dataset end to end, and rotate temporary recovery credentials. Document provider-specific commands and responsible operators outside this repository; Niyān's guide cannot know an institution's snapshot, retention, or network controls.
+
+## Disposable recovery rehearsal
+
+`rehearse_recovery.py` automates a destructive but isolated proof of this procedure. It creates a uniquely named `niyan-recovery-rehearsal/<UUID>/` prefix in the configured S3 bucket, starts a disposable PostgreSQL 17 container, and uses temporary Git storage. It then:
+
+1. creates and validates a recovery fixture with the tagged `v0.1.0` source;
+2. backs up PostgreSQL, bare Git, and the isolated S3 prefix;
+3. destroys all three source stores and restores them into an empty installation;
+4. upgrades the restored installation with the current source and validates identity, authorization, Git integrity, and LFS bytes;
+5. reconciles an interrupted permanent deletion; and
+6. proves the documented rollback boundary by restoring the original three-store recovery point and validating it with `v0.1.0` again.
+
+The rehearsal never reads, copies, or deletes keys outside its generated prefix. It removes both source and backup prefixes and stops the database container on success or failure. It does incur object-storage requests and requires Docker, Git, the server virtual environment, and credentials for a disposable S3-compatible bucket:
+
+```shell
+NIYAN_RUN_RECOVERY_REHEARSAL=1 apps/server/.venv/bin/python deploy/rehearse_recovery.py --env-file apps/server/.env
+```
+
+This is a verification harness, not a general-purpose backup command. Production operators must continue to use provider-native snapshots or their own consistent backup tooling and retention policy.
