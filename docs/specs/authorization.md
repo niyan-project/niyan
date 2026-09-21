@@ -54,6 +54,24 @@ A dataset is visible when the user has at least reader access. An inaccessible p
 
 A namespace is visible to its personal owner, to a member of that group or an ancestor group, or when it contains at least one dataset visible through an explicit grant. Dataset listings include only datasets visible to the caller.
 
+## Cross-surface failure contract
+
+REST, Git smart HTTP, Git LFS, browser repository APIs, the CLI, and the Python filesystem client must preserve the same authorization distinctions. Protocol-specific response bodies and authentication challenges may differ, but their meaning must follow this matrix:
+
+| Request state | HTTP result | Meaning |
+| --- | --- | --- |
+| Missing credential on a protected endpoint | `401` | Authentication is required. Git and Git LFS include their Basic authentication challenge. |
+| Invalid, expired, or revoked access token | `401` | The credential cannot establish an active identity. Responses must not echo token material. |
+| Active token lacking the required scope | `403` | The authenticated credential is too narrowly scoped. |
+| Active dataset-bound token targeting another dataset | `403` | The credential's explicit resource boundary excludes the target. |
+| Authenticated user without reader access to a private dataset | `404` | The dataset is indistinguishable from an unknown dataset. |
+| Unknown dataset | `404` | No dataset information is disclosed. |
+| Session or active token with sufficient scope, boundary, and current role | operation-specific success | Authorization is recalculated for every request. |
+
+Browser sessions are not restricted by token scopes or token resource boundaries, but unsafe browser requests remain subject to CSRF protection. Git and Git LFS use the same access tokens as Basic-auth passwords. REST, CLI, and fsspec use them as bearer tokens. A `write_repository` scope includes `read_repository`; no API scope implies repository access.
+
+Clients must not collapse these outcomes. The CLI should report authentication failure, forbidden access, and absence distinctly. The fsspec adapter raises `NiyanAuthenticationError` for `401`, `NiyanPermissionError` for `403`, and `NiyanNotFoundError` for `404`; its `exists()` method may convert only the not-found case to `False`.
+
 ## Policy Boundary
 
 The server exposes explicit policy operations for:

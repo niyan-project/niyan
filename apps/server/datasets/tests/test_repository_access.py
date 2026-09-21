@@ -219,6 +219,58 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertEqual(lfs_response.json()['lfs_object_id'], self.lfs_object_id)
         self.assertTrue(lfs_response.json()['range_supported'])
 
+    def test_lfs_download_action_uses_the_shared_authorization_matrix(self):
+        """Apply one failure contract before issuing direct-storage download URLs."""
+
+        LfsObject.objects.create(
+            dataset=self.dataset,
+            oid=self.lfs_object_id,
+            size=123456,
+            state=LfsObject.State.AVAILABLE,
+            verification_method=LfsObject.VerificationMethod.SIZE,
+            available_at=timezone.now(),
+        )
+        other_dataset = create_dataset(namespace=self.user.personal_namespace, slug='other', name='Other', created_by=self.user)
+        _, user_token = create_access_token(user=self.user, name='User reader', scopes=['read_repository'], origin=AccessToken.Origin.MANUAL)
+        _, dataset_token = create_access_token(user=self.user, name='Dataset reader', scopes=['read_repository'], origin=AccessToken.Origin.MANUAL, dataset=self.dataset)
+        _, wrong_scope_token = create_access_token(user=self.user, name='Metadata reader', scopes=['read_api'], origin=AccessToken.Origin.MANUAL)
+        _, wrong_boundary_token = create_access_token(user=self.user, name='Other reader', scopes=['read_repository'], origin=AccessToken.Origin.MANUAL, dataset=other_dataset)
+        expired_record, expired_token = create_access_token(user=self.user, name='Expired reader', scopes=['read_repository'], origin=AccessToken.Origin.MANUAL)
+        revoked_record, revoked_token = create_access_token(user=self.user, name='Revoked reader', scopes=['read_repository'], origin=AccessToken.Origin.MANUAL)
+        outsider = User.objects.create_user(username='outsider')
+        _, outsider_token = create_access_token(user=outsider, name='Outsider reader', scopes=['read_repository'], origin=AccessToken.Origin.MANUAL)
+        AccessToken.objects.filter(pk=expired_record.pk).update(expires_at=timezone.now())
+        AccessToken.objects.filter(pk=revoked_record.pk).update(revoked_at=timezone.now())
+        url = self.repository_url('download')
+        action = PresignedAction(method='GET', url='https://objects.example.test/signed', headers={}, expires_in=300)
+
+        with patch('datasets.repository_api.issue_download_action', return_value=action) as issue_action:
+            session = self.client.get(url, {'path': 'large.bin'})
+            self.client.logout()
+            user = self.client.get(url, {'path': 'large.bin'}, HTTP_AUTHORIZATION=f'Bearer {user_token}')
+            bounded = self.client.get(url, {'path': 'large.bin'}, HTTP_AUTHORIZATION=f'Bearer {dataset_token}')
+            unauthenticated = self.client.get(url, {'path': 'large.bin'})
+            wrong_scope = self.client.get(url, {'path': 'large.bin'}, HTTP_AUTHORIZATION=f'Bearer {wrong_scope_token}')
+            wrong_boundary = self.client.get(url, {'path': 'large.bin'}, HTTP_AUTHORIZATION=f'Bearer {wrong_boundary_token}')
+            expired = self.client.get(url, {'path': 'large.bin'}, HTTP_AUTHORIZATION=f'Bearer {expired_token}')
+            revoked = self.client.get(url, {'path': 'large.bin'}, HTTP_AUTHORIZATION=f'Bearer {revoked_token}')
+            hidden = self.client.get(url, {'path': 'large.bin'}, HTTP_AUTHORIZATION=f'Bearer {outsider_token}')
+            unknown = self.client.get(
+                f'/api/v1/datasets/{uuid4()}/repository/download',
+                {'path': 'large.bin'},
+                HTTP_AUTHORIZATION=f'Bearer {user_token}',
+            )
+
+        self.assertEqual([session.status_code, user.status_code, bounded.status_code], [200, 200, 200])
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(wrong_scope.status_code, 403)
+        self.assertEqual(wrong_boundary.status_code, 403)
+        self.assertEqual(expired.status_code, 401)
+        self.assertEqual(revoked.status_code, 401)
+        self.assertEqual(hidden.status_code, 404)
+        self.assertEqual(unknown.status_code, 404)
+        self.assertEqual(issue_action.call_count, 3)
+
     def test_repository_browsing_requires_repository_scope_for_bearer_token(self):
         """Keep API metadata scopes separate from repository-content scopes."""
 
@@ -482,6 +534,48 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
         expired = discover(self.dataset.id, expired_token)
         revoked = discover(self.dataset.id, revoked_token)
 
+        self.assertEqual(wrong_boundary.status_code, 403)
+        self.assertEqual(invisible.status_code, 404)
+        self.assertEqual(unknown.status_code, 404)
+        self.assertEqual(expired.status_code, 401)
+        self.assertEqual(revoked.status_code, 401)
+        self.assertEqual(expired['WWW-Authenticate'], 'Basic realm="Niyan Git"')
+        self.assertNotIn(expired_token, expired.content.decode())
+        self.assertNotIn(revoked_token, revoked.content.decode())
+
+    def test_upload_pack_applies_the_same_read_authorization_matrix(self):
+        """Protect Git fetch with scope, boundary, liveness, and non-disclosure."""
+
+        other_dataset = create_dataset(namespace=self.user.personal_namespace, slug='other', name='Other', created_by=self.user)
+        _, bounded_token = create_access_token(user=self.user, name='This dataset', scopes=['read_repository'], origin=AccessToken.Origin.CLI, dataset=self.dataset)
+        _, wrong_boundary_token = create_access_token(user=self.user, name='Other only', scopes=['read_repository'], origin=AccessToken.Origin.CLI, dataset=other_dataset)
+        _, wrong_scope_token = create_access_token(user=self.user, name='API only', scopes=['read_api'], origin=AccessToken.Origin.CLI)
+        outsider = User.objects.create_user(username='outsider')
+        _, outsider_token = create_access_token(user=outsider, name='Outsider', scopes=['read_repository'], origin=AccessToken.Origin.CLI)
+        expired_record, expired_token = create_access_token(user=self.user, name='Expired', scopes=['read_repository'], origin=AccessToken.Origin.CLI)
+        revoked_record, revoked_token = create_access_token(user=self.user, name='Revoked', scopes=['read_repository'], origin=AccessToken.Origin.CLI)
+        AccessToken.objects.filter(pk=expired_record.pk).update(expires_at=timezone.now())
+        AccessToken.objects.filter(pk=revoked_record.pk).update(revoked_at=timezone.now())
+        client = Client()
+
+        def discover(dataset_id, token, username=self.user.username):
+            return client.get(
+                f'/git/{dataset_id}.git/info/refs',
+                {'service': 'git-upload-pack'},
+                HTTP_AUTHORIZATION=_basic_header(username, token),
+            )
+
+        user = discover(self.dataset.id, self.raw_token)
+        bounded = discover(self.dataset.id, bounded_token)
+        wrong_scope = discover(self.dataset.id, wrong_scope_token)
+        wrong_boundary = discover(self.dataset.id, wrong_boundary_token)
+        invisible = discover(self.dataset.id, outsider_token, outsider.username)
+        unknown = discover(uuid4(), self.raw_token)
+        expired = discover(self.dataset.id, expired_token)
+        revoked = discover(self.dataset.id, revoked_token)
+
+        self.assertEqual([user.status_code, bounded.status_code], [200, 200])
+        self.assertEqual(wrong_scope.status_code, 403)
         self.assertEqual(wrong_boundary.status_code, 403)
         self.assertEqual(invisible.status_code, 404)
         self.assertEqual(unknown.status_code, 404)

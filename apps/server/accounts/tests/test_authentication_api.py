@@ -128,6 +128,18 @@ class AccessTokenApiTests(TestCase):
         self.assertEqual(authenticated_response.status_code, 401)
         self.assertIsNotNone(AccessToken.objects.get().revoked_at)
 
+    def test_expired_access_token_stops_authenticating(self):
+        """Reject an expired bearer token at the HTTP authentication boundary."""
+
+        issued = self.issue_token().json()
+        AccessToken.objects.filter(pk=issued['id']).update(expires_at=timezone.now() - timedelta(seconds=1))
+        self.client.logout()
+
+        response = self.client.get('/api/v1/auth/me', HTTP_AUTHORIZATION=f"Bearer {issued['token']}")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn(issued['token'], response.content.decode())
+
     def test_bearer_token_can_revoke_only_itself(self):
         """Support CLI logout without granting bearer token management."""
 
