@@ -4,8 +4,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Thread
+from threading import Barrier, Thread
 from unittest.mock import patch
 
 from django.test import LiveServerTestCase, override_settings
@@ -238,6 +239,57 @@ class CliAlphaWorkflowTests(LiveServerTestCase):
 
         self.assertEqual(self._remote_tip(dataset['id']), remote_tip)
         self.assertEqual(self._git('-C', str(rival), 'rev-parse', 'HEAD').stdout.strip(), rival_tip)
+
+    def test_simultaneous_pushes_allow_exactly_one_writer_to_move_the_ref(self):
+        """Let Git's ref lock select one winner without losing either local commit."""
+
+        dataset, first = self._create_dataset('race')
+        (first / 'data.txt').write_text('initial\n')
+        stage_paths([], all_paths=True, cwd=first)
+        commit_changes(message='Initial dataset', cwd=first, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        push_dataset(paths=self.paths, stores=self.stores, cwd=first, environment=self.environment, stderr=io.StringIO())
+        second = clone_dataset(
+            host=self.live_server_url,
+            dataset_path='researcher/race',
+            destination='second',
+            paths=self.paths,
+            stores=self.stores,
+            cwd=self.workspaces,
+            environment=self.environment,
+            stderr=io.StringIO(),
+        )
+        self._configure_author(second)
+
+        (first / 'first.txt').write_text('first\n')
+        stage_paths(['first.txt'], cwd=first)
+        commit_changes(message='First writer', cwd=first, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        (second / 'second.txt').write_text('second\n')
+        stage_paths(['second.txt'], cwd=second)
+        commit_changes(message='Second writer', cwd=second, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        local_tips = {
+            first: self._git('-C', str(first), 'rev-parse', 'HEAD').stdout.strip(),
+            second: self._git('-C', str(second), 'rev-parse', 'HEAD').stdout.strip(),
+        }
+        start = Barrier(2)
+
+        def publish(checkout):
+            start.wait(timeout=10)
+            try:
+                push_dataset(paths=self.paths, stores=self.stores, cwd=checkout, environment=self.environment, stderr=io.StringIO())
+            except GitConflictError as error:
+                return checkout, 'conflict', str(error)
+            return checkout, 'accepted', ''
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(publish, (first, second)))
+
+        accepted = [result for result in results if result[1] == 'accepted']
+        conflicts = [result for result in results if result[1] == 'conflict']
+        self.assertEqual(len(accepted), 1, results)
+        self.assertEqual(len(conflicts), 1, results)
+        self.assertEqual(self._remote_tip(dataset['id']), local_tips[accepted[0][0]])
+        self.assertEqual(self._git('-C', str(conflicts[0][0]), 'rev-parse', 'HEAD').stdout.strip(), local_tips[conflicts[0][0]])
+        self.assertIn('Pull the latest changes and resolve any divergence', conflicts[0][2])
 
     def _create_dataset(self, slug):
         """Create and clone one empty dataset through the public client APIs."""
