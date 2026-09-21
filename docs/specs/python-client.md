@@ -82,11 +82,15 @@ An open file uses bounded HTTP range requests to satisfy reads and seeks where t
 
 Signed transfer URLs are short-lived bearer credentials. The client must not log them, persist them in filesystem metadata, or expose them as the normal public return value. If a URL expires, the client may request a replacement and retry only when doing so preserves the caller's read position and does not misrepresent a failed operation as successful.
 
+Dataset deletion immediately prevents Niyān from issuing or renewing transfer authorization. A direct object-storage response that was already opened may finish because its bytes no longer pass through Django; deletion cannot retroactively revoke bytes already in flight. A later range request may continue only while its previously issued action remains accepted by storage. If storage rejects that action, the client must reauthorize, surface the resulting not-found response, and never reinterpret the failed read as end-of-file or complete content.
+
 Files stored as ordinary Git blobs must remain readable through the same filesystem API. Their internal transport may differ, but the client-facing path, revision, metadata, and error semantics should not.
 
 ## Downloads and Integrity
 
 Full-file downloads must stream into a temporary or explicitly partial local destination and publish the final path only after success. An interrupted transfer must leave a recognizable partial artifact or clean it up according to an explicit option; it must not leave a truncated file under the requested final name.
+
+An object recorded as available but missing from storage is a transfer failure, not an empty file. The client must not publish the final path, and the retained partial artifact follows the same explicit cleanup policy as any other interrupted download.
 
 When an expected Git LFS SHA-256 object identifier is available, a complete download should verify it incrementally before finalizing the file. Partial and ranged reads cannot claim whole-object verification. Size and resolved revision metadata must remain available to callers that need their own checks.
 

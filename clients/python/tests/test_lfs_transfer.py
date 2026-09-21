@@ -23,11 +23,12 @@ OID = hashlib.sha256(OBJECT_CONTENT).hexdigest()
 class RecordingUploader:
     """Record exact ranges and optionally interrupt one first attempt."""
 
-    def __init__(self, *, retry_offset=None, terminal=False):
+    def __init__(self, *, retry_offset=None, terminal=False, always_retryable=False):
         """Configure deterministic transient or terminal behavior."""
 
         self.retry_offset = retry_offset
         self.terminal = terminal
+        self.always_retryable = always_retryable
         self.calls = []
         self.attempts = {}
         self.lock = threading.Lock()
@@ -41,6 +42,8 @@ class RecordingUploader:
             attempt = self.attempts[offset]
         if self.terminal:
             raise TransferFailure('terminal upload failure')
+        if self.always_retryable:
+            raise RetryableTransferFailure('persistent storage outage')
         if self.retry_offset == offset and attempt == 1:
             raise RetryableTransferFailure('interrupted part')
         return {'etag': f'"etag-{offset}"', 'checksum_crc32c': f'checksum-{offset}'}
@@ -213,6 +216,23 @@ class CustomTransferProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(TransferFailure, 'terminal upload failure'):
             transfer.upload({'event': 'upload', 'oid': OID, 'size': 10, 'path': str(object_path), 'action': {'href': initiation_url}})
 
+        self.assertTrue(any(method == 'DELETE' and url.endswith(api.session_id) for method, url, _ in api.calls))
+
+    def test_retryable_multipart_failure_stops_at_budget_and_aborts(self):
+        """Bound transient retries and retire the server session after exhaustion."""
+
+        object_path = self.root / 'large-object'
+        object_path.write_bytes(OBJECT_CONTENT)
+        api = MultipartApi()
+        uploader = RecordingUploader(always_retryable=True)
+        transfer = UploadTransfer(identity=self.identity, token='niyan_test_secret', writer=ProtocolWriter(io.StringIO()), api_factory=api.factory, uploader=uploader, sleep=lambda _: None, workers=1, attempts=3)
+        initiation_url = f'{HOST}/api/v1/datasets/{DATASET_ID}/lfs/objects/{OID}/multipart'
+
+        with self.assertRaisesRegex(RetryableTransferFailure, 'persistent storage outage'):
+            transfer.upload({'event': 'upload', 'oid': OID, 'size': 10, 'path': str(object_path), 'action': {'href': initiation_url}})
+
+        self.assertEqual(uploader.attempts, {0: 3, 4: 3, 8: 3})
+        self.assertIsNone(api.completed_parts)
         self.assertTrue(any(method == 'DELETE' and url.endswith(api.session_id) for method, url, _ in api.calls))
 
     def test_invalid_control_url_never_receives_object_bytes(self):

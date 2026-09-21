@@ -271,6 +271,25 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertEqual(unknown.status_code, 404)
         self.assertEqual(issue_action.call_count, 3)
 
+    def test_dataset_deletion_stops_new_download_actions_immediately(self):
+        """Refuse to mint another storage capability once deletion begins."""
+
+        LfsObject.objects.create(
+            dataset=self.dataset,
+            oid=self.lfs_object_id,
+            size=123456,
+            state=LfsObject.State.AVAILABLE,
+            verification_method=LfsObject.VerificationMethod.SIZE,
+            available_at=timezone.now(),
+        )
+        Dataset.objects.filter(pk=self.dataset.pk).update(deletion_started_at=timezone.now())
+
+        with patch('datasets.repository_api.issue_download_action') as issue_action:
+            response = self.client.get(self.repository_url('download'), {'path': 'large.bin'})
+
+        self.assertEqual(response.status_code, 404)
+        issue_action.assert_not_called()
+
     def test_repository_browsing_requires_repository_scope_for_bearer_token(self):
         """Keep API metadata scopes separate from repository-content scopes."""
 

@@ -1,11 +1,11 @@
 import hashlib
 import tempfile
 import unittest
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from pathlib import Path
 
 from niyan.errors import ApiError
-from niyan.filesystem import NiyanFileSystem, NiyanIntegrityError
+from niyan.filesystem import NiyanFileSystem, NiyanIntegrityError, NiyanTransferError
 
 
 COMMIT = 'a' * 40
@@ -135,6 +135,14 @@ class InterruptedOpener(DownloadOpener):
         return super().open(request, timeout)
 
 
+class MissingObjectOpener(DownloadOpener):
+    """Represent metadata that outlived its supposedly available object."""
+
+    def open(self, request, timeout):
+        self.requests.append(('large.bin', 0, 0, None))
+        raise HTTPError(request.full_url, 404, 'Object missing', {}, None)
+
+
 def _parse_range(header):
     """Parse the bounded range emitted by the filesystem."""
 
@@ -212,6 +220,19 @@ class FileSystemDownloadTests(unittest.TestCase):
 
             self.assertFalse(destination.exists())
             self.assertEqual(Path(f'{destination}.niyan-part').read_bytes(), LFS_CONTENT[:7])
+
+    def test_missing_verified_object_never_becomes_a_completed_download(self):
+        """Surface stale storage metadata without publishing an empty final file."""
+
+        fs = NiyanFileSystem(token='niyan_test-token', api_factory=DownloadApi, transfer_opener=MissingObjectOpener(), block_size=7)
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / 'large.bin'
+
+            with self.assertRaises(NiyanTransferError):
+                fs.get_file('niyan://data.example.test/lab/images/large.bin?revision=main', destination)
+
+            self.assertFalse(destination.exists())
+            self.assertEqual(Path(f'{destination}.niyan-part').read_bytes(), b'')
 
     def test_recursive_download_resolves_once_and_pins_every_child(self):
         """Materialize a directory without re-resolving a moving branch."""

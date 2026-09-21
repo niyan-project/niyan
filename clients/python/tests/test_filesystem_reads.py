@@ -6,7 +6,7 @@ import fsspec
 import polars
 
 from niyan.errors import ApiError
-from niyan.filesystem import NiyanFileSystem
+from niyan.filesystem import NiyanFileSystem, NiyanNotFoundError
 
 
 GIT_CONTENT = b'sample,value\nalpha,1\nbeta,2\n'
@@ -113,6 +113,37 @@ class TransferOpener:
         return TransferResponse(content, content_range=f'bytes {start}-{end}/{size}')
 
 
+class DeletedDatasetOpener(TransferOpener):
+    """Expire an action after one successful range from an active read."""
+
+    def open(self, request, timeout):
+        if self.requests:
+            raise HTTPError(request.full_url, 403, 'Action expired', {}, io.BytesIO())
+        return super().open(request, timeout)
+
+
+class DeletedDatasetApi(ReadApi):
+    """Issue one action, then reject renewal after dataset deletion."""
+
+    def authorize_repository_download(self, dataset_id, *, revision, path):
+        self.authorizations.append((dataset_id, revision, path))
+        if len(self.authorizations) > 1:
+            raise ApiError('The requested dataset does not exist.', status=404, code='dataset_not_found')
+        return 200, {
+            'resolved_commit': revision,
+            'path': path,
+            'size': LFS_SIZE,
+            'object_id': 'd' * 40,
+            'lfs_object_id': LFS_OID,
+            'storage': 'lfs',
+            'method': 'GET',
+            'url': 'https://objects.example.test/signed-active?secret=hidden',
+            'headers': {'X-Signed-Header': 'required'},
+            'expires_in': 300,
+            'range_supported': True,
+        }
+
+
 def _parse_range(header):
     """Parse the exact bounded range emitted by the filesystem."""
 
@@ -157,6 +188,18 @@ class FileSystemReadTests(unittest.TestCase):
         self.assertTrue(any(request[1].startswith('bytes=4000000000-') for request in self.opener.requests))
         self.assertTrue(all(request[2] is None for request in self.opener.requests))
         self.assertTrue(all(request[3] == 'required' for request in self.opener.requests))
+
+    def test_dataset_deletion_during_read_prevents_action_renewal(self):
+        """Allow completed ranges but fail a later range once reauthorization disappears."""
+
+        fs = NiyanFileSystem(token='niyan_test-token', api_factory=DeletedDatasetApi, transfer_opener=DeletedDatasetOpener(), block_size=4)
+        with fs.open('niyan://data.example.test/lab/images/large.bin?revision=main', 'rb') as file:
+            self.assertEqual(file.read(3), bytes(range(3)))
+            file.seek(4_000_000_000)
+            with self.assertRaises(NiyanNotFoundError):
+                file.read(5)
+
+        self.assertEqual(len(DeletedDatasetApi.instances[-1].authorizations), 2)
 
     def test_cat_file_reads_only_the_requested_interval(self):
         """Expose standard fsspec byte-range reads without opening a checkout."""
