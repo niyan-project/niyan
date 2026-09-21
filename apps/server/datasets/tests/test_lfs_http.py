@@ -1,5 +1,5 @@
 import base64
-from unittest.mock import patch
+from unittest.mock import ANY, call, patch, sentinel
 
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
@@ -81,7 +81,20 @@ class LfsBatchApiTests(TestCase):
         self.assertNotIn(self.write_token, verify_action['header']['Authorization'])
         lfs_object = LfsObject.objects.get(dataset=self.dataset, oid=oid)
         self.assertEqual(lfs_object.state, LfsObject.State.PENDING)
-        issue_action.assert_called_once_with(lfs_object=lfs_object)
+        issue_action.assert_called_once_with(lfs_object=lfs_object, object_store=ANY)
+
+    def test_batch_reuses_one_object_store_adapter_for_every_action(self):
+        """Avoid rebuilding boto sessions and clients for every batch object."""
+
+        objects = [{'oid': f'{index:064x}', 'size': 12} for index in range(1, 4)]
+        action = PresignedAction(method='PUT', url='https://storage.example.test/signed')
+        with patch('datasets.lfs_transfers.S3ObjectStore', return_value=sentinel.object_store) as store_factory, patch('datasets.lfs_http.issue_upload_action', return_value=action) as issue_action:
+            response = self.post_batch({'operation': 'upload', 'objects': objects})
+
+        self.assertEqual(response.status_code, 200)
+        store_factory.assert_called_once()
+        lfs_objects = list(LfsObject.objects.filter(dataset=self.dataset).order_by('oid'))
+        self.assertEqual(issue_action.call_args_list, [call(lfs_object=lfs_object, object_store=sentinel.object_store) for lfs_object in lfs_objects])
 
     def test_upload_reuses_available_object_without_action(self):
         """Tell Git LFS existing verified content needs no upload."""

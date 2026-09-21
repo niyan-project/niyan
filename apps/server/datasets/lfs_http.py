@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from accounts.authentication import access_token_permits, authenticate_git_basic
 from accounts.models import AccessToken
+from datasets import lfs_transfers
 from datasets.lfs_transfers import LfsIntegrityError, LfsObjectMissing, LfsTransferUnavailable, finalize_lfs_upload, issue_download_action, issue_upload_action
 from datasets.models import Dataset, LfsObject
 from datasets.object_storage import ObjectStoreError
@@ -88,6 +89,9 @@ def lfs_batch(request, dataset_id):
         transfer = _select_transfer(payload)
     except InvalidLfsBatch as error:
         return _lfs_response({'message': str(error)}, status=error.status)
+    # Resolve through the transfer module so its adapter boundary remains one
+    # shared injection seam for tests and alternate deployments.
+    object_store = lfs_transfers.S3ObjectStore(settings.NIYAN_S3_CONFIGURATION)
     objects = [
         _negotiate_object(
             dataset=dataset,
@@ -97,6 +101,7 @@ def lfs_batch(request, dataset_id):
             transfer=transfer,
             verify_url=request.build_absolute_uri(reverse('git-lfs-verify', kwargs={'dataset_id': dataset.id, 'oid': requested['oid']})),
             multipart_url=request.build_absolute_uri(f'/api/v1/datasets/{dataset.id}/lfs/objects/{requested["oid"]}/multipart'),
+            object_store=object_store,
         )
         for requested in payload['objects']
     ]
@@ -246,18 +251,18 @@ def _parse_verify_request(request, *, route_oid):
     return {'size': size}
 
 
-def _negotiate_object(*, dataset, access_token, operation, requested, transfer, verify_url, multipart_url):
+def _negotiate_object(*, dataset, access_token, operation, requested, transfer, verify_url, multipart_url, object_store):
     """Negotiate one object without exposing storage or policy internals."""
 
     oid = requested['oid']
     size = requested['size']
     response = {'oid': oid, 'size': size, 'authenticated': True}
     if operation == 'upload':
-        return _negotiate_upload(dataset=dataset, access_token=access_token, oid=oid, size=size, response=response, transfer=transfer, verify_url=verify_url, multipart_url=multipart_url)
-    return _negotiate_download(dataset=dataset, oid=oid, size=size, response=response)
+        return _negotiate_upload(dataset=dataset, access_token=access_token, oid=oid, size=size, response=response, transfer=transfer, verify_url=verify_url, multipart_url=multipart_url, object_store=object_store)
+    return _negotiate_download(dataset=dataset, oid=oid, size=size, response=response, object_store=object_store)
 
 
-def _negotiate_upload(*, dataset, access_token, oid, size, response, transfer, verify_url, multipart_url):
+def _negotiate_upload(*, dataset, access_token, oid, size, response, transfer, verify_url, multipart_url, object_store):
     """Reuse verified content or authorize one bounded basic upload."""
 
     try:
@@ -277,7 +282,7 @@ def _negotiate_upload(*, dataset, access_token, oid, size, response, transfer, v
         response['actions'] = {'upload': {'href': multipart_url}, 'verify': verify_action}
         return response
     try:
-        action = issue_upload_action(lfs_object=lfs_object)
+        action = issue_upload_action(lfs_object=lfs_object, object_store=object_store)
     except (LfsTransferUnavailable, ObjectStoreError):
         return _object_error(response, 503, 'The upload action is temporarily unavailable.')
     response['actions'] = {'upload': _serialize_action(action), 'verify': verify_action}
@@ -326,7 +331,7 @@ def _authenticate_verify_request(*, request, dataset_id, oid):
     return access_token, claims
 
 
-def _negotiate_download(*, dataset, oid, size, response):
+def _negotiate_download(*, dataset, oid, size, response, object_store):
     """Authorize a direct download only for finalized matching content."""
 
     lfs_object = LfsObject.objects.filter(dataset=dataset, oid=oid).first()
@@ -335,7 +340,7 @@ def _negotiate_download(*, dataset, oid, size, response):
     if lfs_object.size != size:
         return _object_error(response, 422, 'The declared object size conflicts with existing metadata.')
     try:
-        action = issue_download_action(lfs_object=lfs_object)
+        action = issue_download_action(lfs_object=lfs_object, object_store=object_store)
     except (LfsTransferUnavailable, ObjectStoreError):
         return _object_error(response, 503, 'The download action is temporarily unavailable.')
     response['actions'] = {'download': _serialize_action(action)}
