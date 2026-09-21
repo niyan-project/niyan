@@ -1,0 +1,31 @@
+{
+  "system": {
+    "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.43",
+    "python": "3.14.4",
+    "git": "git version 2.53.0",
+    "cpu_count": 4,
+    "peak_rss_bytes": 25853952
+  },
+  "cases": [
+    {
+      "path_count": 1000000,
+      "create_seconds": 33.23163491295418,
+      "recursive_tree_browse_seconds": 0.32091956003569067,
+      "shallow_clone_checkout_seconds": 56.968164656020235,
+      "status_seconds": 2.4176835200050846,
+      "fetch_seconds": 0.4231236840132624,
+      "push_commit_seconds": 1.5896764399949461,
+      "push_seconds": 0.17666468501556665,
+      "bare_repository_bytes": 2883584,
+      "checkout_bytes": 4234907648,
+      "niyan_repository_browser": {
+        "root_page_seconds": 0.017448183964006603,
+        "root_page_items": 100,
+        "last_root_page_seconds": 0.011489775963127613,
+        "last_root_page_items": 100,
+        "shard_page_seconds": 0.022198519960511476,
+        "shard_page_items": 100
+      }
+    }
+  ]
+}

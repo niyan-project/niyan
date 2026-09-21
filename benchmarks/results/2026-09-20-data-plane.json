@@ -1,0 +1,27 @@
+{
+  "system": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "python": "3.13.7"
+  },
+  "object": {
+    "size_bytes": 2214592512,
+    "part_size_bytes": 67108864,
+    "part_count": 33,
+    "server_side_multipart_copy_seconds": 52.21354579197941
+  },
+  "lfs_batch_100_seconds": [
+    1.8555182500276715,
+    1.7735504590091296,
+    1.721049083978869,
+    2.128647333011031,
+    1.6449102909537032
+  ],
+  "lfs_batch_100_median_seconds": 1.7735504590091296,
+  "fsspec_reads": {
+    "read_size_bytes": 1048576,
+    "first_range_seconds": 0.991439083009027,
+    "last_range_offset": 2213543936,
+    "last_range_seconds": 0.5549049999681301,
+    "full_object_downloaded": false
+  }
+}
