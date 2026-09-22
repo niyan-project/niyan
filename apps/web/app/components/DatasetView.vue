@@ -367,7 +367,7 @@ async function publishDraft() {
       </UCard>
 
       <UCard v-if="emptyRepository">
-        <template #header><div class="flex items-start gap-3"><UIcon name="i-lucide-git-commit-horizontal" class="mt-0.5 size-5 text-primary" /><div><h2 class="font-medium text-highlighted">This dataset is ready for its first files</h2><p class="mt-1 text-sm text-muted">Use the Niyān CLI so authentication, Git LFS, and the remote are configured safely.</p></div></div></template>
+        <template #header><div class="flex items-start gap-3"><UIcon name="i-lucide-git-commit-horizontal" class="mt-0.5 size-5 text-primary" /><div><h2 class="font-medium text-highlighted">This dataset is ready for its first files</h2><p class="mt-1 text-sm text-muted">Upload files above to create a browser commit, or use the Niyān CLI for a local working copy.</p></div></div></template>
         <div class="mb-4 flex gap-1 border-b border-default">
           <UButton label="Start fresh" color="neutral" :variant="emptyGuide === 'new' ? 'soft' : 'ghost'" @click="emptyGuide = 'new'" />
           <UButton label="Upload existing files" color="neutral" :variant="emptyGuide === 'existing' ? 'soft' : 'ghost'" @click="emptyGuide = 'existing'" />

@@ -91,7 +91,7 @@ async function createDataset() {
         <UFormField label="Name" required><UInput v-model="datasetForm.name" class="w-full" /></UFormField>
         <UFormField label="Slug" required><UInput v-model="datasetForm.slug" class="w-full" /></UFormField>
         <UFormField label="Description" hint="Optional" class="sm:col-span-3"><UTextarea v-model="datasetForm.description" :maxlength="500" autoresize class="w-full" /></UFormField>
-        <UAlert class="sm:col-span-3" color="neutral" variant="soft" icon="i-lucide-terminal" description="The dataset starts empty. Use the Niyān CLI to add and push files." />
+        <UAlert class="sm:col-span-3" color="neutral" variant="soft" icon="i-lucide-upload" description="The dataset starts empty. Upload and commit files from its Files page, or populate it with the Niyān CLI." />
         <div class="flex justify-end gap-2 sm:col-span-3"><UButton label="Cancel" color="neutral" variant="ghost" @click="showDatasetForm = false" /><UButton type="submit" label="Create dataset" :loading="saving" /></div>
       </form>
     </UCard>

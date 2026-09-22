@@ -156,7 +156,7 @@ async function deleteGroup() {
         <UFormField label="Name" required><UInput v-model="datasetForm.name" class="w-full" /></UFormField>
         <UFormField label="Slug" required><UInput v-model="datasetForm.slug" class="w-full" /></UFormField>
         <UFormField label="Description" hint="Optional" class="sm:col-span-2"><UTextarea v-model="datasetForm.description" :maxlength="500" autoresize class="w-full" /></UFormField>
-        <UAlert class="sm:col-span-2" color="neutral" variant="soft" icon="i-lucide-terminal" description="Use the Niyān CLI to populate this dataset after creation." />
+        <UAlert class="sm:col-span-2" color="neutral" variant="soft" icon="i-lucide-upload" description="Upload and commit files from the dataset's Files page, or populate it with the Niyān CLI." />
         <div class="flex justify-end sm:col-span-2"><UButton type="submit" label="Create dataset" :loading="saving" /></div>
       </form>
     </UCard>
