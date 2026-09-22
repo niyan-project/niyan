@@ -1,7 +1,7 @@
 export type Role = 'reader' | 'contributor' | 'maintainer' | 'owner'
 
 export interface ApiErrorBody { code: string, detail: string }
-export interface CurrentUser { id: number, username: string, display_name: string, email: string, is_staff: boolean, is_superuser: boolean, system_permissions: SystemPermission[], authentication_method: 'session' | 'access_token', access_token: AccessTokenMetadata | null }
+export interface CurrentUser { id: number, username: string, display_name: string, first_name?: string, last_name?: string, email: string, is_staff: boolean, is_superuser: boolean, system_permissions: SystemPermission[], authentication_method: 'session' | 'access_token', access_token: AccessTokenMetadata | null }
 export type SystemPermission = 'users.view' | 'users.add' | 'groups.view' | 'groups.add' | 'groups.change' | 'groups.delete' | 'datasets.view' | 'datasets.add' | 'datasets.change' | 'datasets.delete'
 export interface SystemUser { id: number, username: string, display_name: string, email: string, is_active: boolean, is_staff: boolean, is_superuser: boolean, date_joined: string, last_login: string | null }
 export interface SystemUserList { count: number, limit: number, offset: number, items: SystemUser[] }

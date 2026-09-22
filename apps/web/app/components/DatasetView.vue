@@ -105,6 +105,10 @@ const commits = ref(initialData.value?.commits || [])
 const grants = ref(initialData.value?.grants || [])
 const groupCandidates = ref(initialData.value?.groupCandidates || [])
 const resolvedCommit = ref<string | null>(tree.value?.resolved_commit || null)
+const datasetBreadcrumbs = computed(() => {
+  const namespaces = props.dataset.namespace_path.split('/').map((segment, index, parts) => ({ label: segment, to: `/${parts.slice(0, index + 1).join('/')}` }))
+  return [...namespaces, { label: props.dataset.slug, to: `/${datasetPath.value}` }]
+})
 const breadcrumbs = computed(() => treePath.value ? treePath.value.split('/').map((segment, index, parts) => ({ label: segment, path: parts.slice(0, index + 1).join('/') })) : [])
 const uploadOpen = ref(false)
 const selectedFiles = ref<File[]>([])
@@ -327,7 +331,7 @@ async function publishDraft() {
 <template>
   <UContainer class="py-8">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div><p class="font-mono text-sm text-muted"><NuxtLink :to="`/${dataset.namespace_path}`" class="hover:text-primary">{{ dataset.namespace_path }}</NuxtLink> / {{ dataset.slug }}</p><h1 class="mt-1 text-2xl font-medium text-highlighted">{{ dataset.name }}</h1><p v-if="dataset.description" class="mt-2 max-w-3xl text-muted">{{ dataset.description }}</p></div>
+      <div><nav class="flex flex-wrap items-center gap-1 font-mono text-sm text-muted" aria-label="Dataset breadcrumb"><template v-for="(crumb, index) in datasetBreadcrumbs" :key="crumb.to"><span v-if="index" aria-hidden="true">/</span><NuxtLink :to="crumb.to" class="rounded px-1 py-0.5 hover:text-primary">{{ crumb.label }}</NuxtLink></template></nav><h1 class="mt-1 text-2xl font-medium text-highlighted">{{ dataset.name }}</h1><SafeMarkdown v-if="dataset.description" class="mt-2 max-w-3xl text-muted" :content="dataset.description" /></div>
       <UPopover :content="{ align: 'end' }">
         <UButton label="Clone" icon="i-lucide-terminal" trailing-icon="i-lucide-chevron-down" />
         <template #content>

@@ -87,6 +87,8 @@ class CurrentUserResponse(Schema):
     id: int
     username: str
     display_name: str
+    first_name: str
+    last_name: str
     email: str
     is_staff: bool
     is_superuser: bool
@@ -114,6 +116,13 @@ class PasswordChangeInput(Schema):
 
     current_password: str = Field(min_length=1, max_length=1024)
     new_password: str = Field(min_length=1, max_length=1024)
+
+
+class ProfileChangeInput(Schema):
+    """Carry the editable personal names shown throughout the product."""
+
+    first_name: str = Field(default='', max_length=150)
+    last_name: str = Field(default='', max_length=150)
 
 
 class CsrfResponse(Schema):
@@ -264,6 +273,8 @@ def serialize_current_user(user, *, authentication_method='session', access_toke
         'id': user.id,
         'username': user.username,
         'display_name': user.get_full_name().strip() or user.username,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
         'email': user.email,
         'is_staff': user.is_staff,
         'is_superuser': user.is_superuser,
@@ -390,6 +401,20 @@ def change_email_endpoint(request, payload: EmailChangeInput):
 
     request.auth.email = email
     request.auth.save(update_fields=['email'])
+    return serialize_current_user(request.auth)
+
+
+@router.patch('/me/profile', auth=django_auth, response={200: CurrentUserResponse, 401: ErrorResponse, 422: ErrorResponse})
+def change_profile_endpoint(request, payload: ProfileChangeInput):
+    """Replace the browser user's editable personal names."""
+
+    request.auth.first_name = payload.first_name.strip()
+    request.auth.last_name = payload.last_name.strip()
+    try:
+        request.auth.full_clean(exclude=['password'])
+    except ValidationError:
+        return Status(422, {'code': 'validation_error', 'detail': 'The profile details are invalid.'})
+    request.auth.save(update_fields=['first_name', 'last_name'])
     return serialize_current_user(request.auth)
 
 

@@ -94,6 +94,17 @@ describe('dataset repository view', () => {
     expect(entry?.attributes('type')).toBe('button')
   })
 
+  it('links every dataset breadcrumb and renders its description as safe Markdown', async () => {
+    const markdownDataset = { ...dataset, namespace_path: 'research/vision', description: '**Microscopy** [guide](/guide)' }
+    const wrapper = await mountSuspended(DatasetView, { props: { dataset: markdownDataset }, route: '/research/vision/images?tab=files' })
+    await flushPromises()
+
+    const breadcrumb = wrapper.get('nav[aria-label="Dataset breadcrumb"]')
+    expect(breadcrumb.findAll('a').map(link => link.attributes('href'))).toEqual(['/research', '/research/vision', '/research/vision/images'])
+    expect(wrapper.get('strong').text()).toBe('Microscopy')
+    expect(wrapper.get('a[href="/guide"]').text()).toBe('guide')
+  })
+
   it('creates an explicit browser draft before staging a file deletion', async () => {
     const draft = { id: 'draft-id', dataset_id: dataset.id, target_branch: 'main', base_commit: 'a'.repeat(40), state: 'open', committed_oid: null, expires_at: '2030-01-02T00:00:00Z', changes: [] }
     api.post.mockResolvedValue(draft)

@@ -1,3 +1,3 @@
 <script setup lang="ts">
-await navigateTo('/settings/security/password', { replace: true })
+await navigateTo('/settings/profile', { replace: true })
 </script>

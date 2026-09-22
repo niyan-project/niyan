@@ -77,6 +77,8 @@ describe('system users page', () => {
     expect(password).toMatch(/[a-z]/)
     expect(password).toMatch(/[0-9]/)
     expect(password).toMatch(/[!@#$%^&*()\-_=+]/)
+    expect(document.body.textContent).toContain('Copy the generated password')
+    expect(document.body.textContent).toContain('I copied it')
 
     await wrapper.findAll('input')[1]!.setValue(`${password}x`)
     expect(wrapper.findAll('input')[1]!.element.value).toBe(`${password}x`)

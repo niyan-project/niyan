@@ -7,9 +7,12 @@ describe('Settings pages', () => {
     const wrapper = await mountSuspended(PasswordSettingsPage, { route: '/settings/security/password' })
     const navigation = wrapper.get('nav[aria-label="Settings"]')
 
+    expect(navigation.text()).toContain('Account')
+    expect(navigation.text()).toContain('Profile')
     expect(navigation.text()).toContain('Security')
     expect(navigation.text()).toContain('Email')
-    expect(navigation.text()).toContain('Password and authentication')
+    expect(navigation.text()).toContain('Password')
+    expect(navigation.text()).not.toContain('Password and authentication')
     expect(navigation.text()).toContain('Access tokens')
     expect(wrapper.text()).not.toContain('Review your Niyān account')
   })

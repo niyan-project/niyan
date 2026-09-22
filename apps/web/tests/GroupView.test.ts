@@ -56,4 +56,13 @@ describe('group collaboration view', () => {
     const userSelect = wrapper.findAllComponents({ name: 'USelect' })[0]
     expect(userSelect.props('items')).toEqual([{ label: 'Colleague (colleague)', value: 'colleague' }])
   })
+
+  it('links every level of a nested group breadcrumb', async () => {
+    const nested = { ...group, parent_id: 'parent-id', parent_path: 'research', path: 'research/vision', slug: 'vision' }
+    const wrapper = await mountSuspended(GroupView, { props: { group: nested } })
+    await flushPromises()
+
+    const breadcrumb = wrapper.get('nav[aria-label="Group breadcrumb"]')
+    expect(breadcrumb.findAll('a').map(link => link.attributes('href'))).toEqual(['/research', '/research/vision'])
+  })
 })

@@ -272,6 +272,8 @@ class BrowserSessionApiTests(TestCase):
         self.assertEqual(rejected.status_code, 403)
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.json()['display_name'], 'Ada Lovelace')
+        self.assertEqual(accepted.json()['first_name'], 'Ada')
+        self.assertEqual(accepted.json()['last_name'], 'Lovelace')
         self.assertFalse(accepted.json()['is_superuser'])
         self.assertEqual(current.status_code, 200)
 
@@ -327,6 +329,36 @@ class BrowserSessionApiTests(TestCase):
         self.assertEqual(response.json()['email'], 'ada@example.test')
         self.user.refresh_from_db()
         self.assertEqual(self.user.email, 'ada@example.test')
+
+    def test_browser_user_can_change_personal_names(self):
+        """Update low-risk profile fields and return refreshed display metadata."""
+
+        self.client.force_login(self.user)
+        response = self.client.patch(
+            '/api/v1/auth/me/profile',
+            {'first_name': '  Grace ', 'last_name': ' Hopper  '},
+            content_type='application/json',
+            HTTP_X_CSRFTOKEN=self.csrf_token(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['display_name'], 'Grace Hopper')
+        self.user.refresh_from_db()
+        self.assertEqual((self.user.first_name, self.user.last_name), ('Grace', 'Hopper'))
+
+    def test_browser_profile_change_requires_csrf(self):
+        """Keep profile mutations within the same-origin browser boundary."""
+
+        self.client.force_login(self.user)
+        response = self.client.patch(
+            '/api/v1/auth/me/profile',
+            {'first_name': 'Grace', 'last_name': 'Hopper'},
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.user.refresh_from_db()
+        self.assertEqual((self.user.first_name, self.user.last_name), ('Ada', 'Lovelace'))
 
     def test_browser_email_change_rejects_wrong_password(self):
         """Keep possession of an authenticated browser session insufficient alone."""

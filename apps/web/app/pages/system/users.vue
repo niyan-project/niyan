@@ -14,6 +14,7 @@ const canAdd = computed(() => permissions.value.includes('users.add'))
 if (!canView.value && !canAdd.value) throw createError({ statusCode: 403, statusMessage: 'You cannot administer users.' })
 
 const showCreateForm = ref(false)
+const showGeneratedPassword = ref(false)
 const saving = ref(false)
 const form = reactive({ username: '', password: '', email: '', first_name: '', last_name: '' })
 const { data: page, error, refresh } = await useAsyncData('system-users', async () => canView.value ? api.get<SystemUserList>('/api/v1/system/users?limit=100') : { count: 0, limit: 100, offset: 0, items: [] }, { lazy: false, getCachedData: () => undefined })
@@ -24,9 +25,15 @@ const { formatRelative } = useFormatting()
 function fillRandomPassword() {
   try {
     form.password = generateRandomPassword()
+    showGeneratedPassword.value = true
   } catch (generationError) {
     toast.add({ title: 'Could not generate password', description: generationError instanceof Error ? generationError.message : undefined, color: 'error' })
   }
+}
+
+async function copyGeneratedPassword() {
+  await navigator.clipboard.writeText(form.password)
+  toast.add({ title: 'Password copied', color: 'success' })
 }
 
 async function createUser() {
@@ -68,6 +75,16 @@ async function createUser() {
         <div class="flex justify-end gap-2 sm:col-span-2"><UButton label="Cancel" color="neutral" variant="ghost" @click="showCreateForm = false" /><UButton type="submit" label="Create user" :loading="saving" :disabled="!form.username || !form.password" /></div>
       </form>
     </UCard>
+
+    <UModal v-model:open="showGeneratedPassword" :dismissible="false" title="Copy the generated password" description="This password will not be shown after the user is created. Send it to the user through an appropriate private channel.">
+      <template #body>
+        <div class="flex flex-col gap-3 sm:flex-row">
+          <UInput :model-value="form.password" readonly class="min-w-0 flex-1 font-mono" />
+          <UButton label="Copy" icon="i-lucide-copy" color="neutral" variant="outline" @click="copyGeneratedPassword" />
+        </div>
+      </template>
+      <template #footer><div class="flex w-full justify-end"><UButton label="I copied it" @click="showGeneratedPassword = false" /></div></template>
+    </UModal>
 
     <UAlert v-if="errorMessage" class="mt-6" color="error" variant="soft" icon="i-lucide-circle-alert" :description="errorMessage" />
     <div v-if="canView" class="mt-6 overflow-hidden rounded-lg border border-default bg-default">

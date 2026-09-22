@@ -36,6 +36,7 @@ const namespaces = computed(() => groupData.value?.namespaces || [])
 const datasets = computed(() => groupData.value?.datasets || [])
 const memberships = computed(() => groupData.value?.memberships || [])
 const childGroups = computed(() => namespaces.value.filter(namespace => namespace.parent_id === props.group.id))
+const groupBreadcrumbs = computed(() => props.group.path.split('/').map((segment, index, parts) => ({ label: segment, path: parts.slice(0, index + 1).join('/') })))
 
 async function createChild() {
   saving.value = true
@@ -125,7 +126,9 @@ async function deleteGroup() {
   <UContainer class="py-8">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div>
-        <p class="font-mono text-sm text-muted">{{ group.path }}</p>
+        <nav class="flex flex-wrap items-center gap-1 font-mono text-sm text-muted" aria-label="Group breadcrumb">
+          <template v-for="(crumb, index) in groupBreadcrumbs" :key="crumb.path"><span v-if="index" aria-hidden="true">/</span><NuxtLink :to="`/${crumb.path}`" class="rounded px-1 py-0.5 hover:text-primary">{{ crumb.label }}</NuxtLink></template>
+        </nav>
         <h1 class="mt-1 text-2xl font-medium text-highlighted">{{ group.name }}</h1>
         <p class="mt-2 text-muted">{{ group.kind === 'personal' ? 'Your personal datasets.' : 'A Niyān group for people and datasets.' }}</p>
       </div>
