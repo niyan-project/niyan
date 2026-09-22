@@ -16,6 +16,7 @@ class SystemApiTests(TestCase):
         self.permission_group.permissions.add(
             Permission.objects.get(content_type__app_label='accounts', codename='view_user'),
             Permission.objects.get(content_type__app_label='accounts', codename='add_user'),
+            Permission.objects.get(content_type__app_label='accounts', codename='change_user'),
         )
         self.operator.groups.add(self.permission_group)
         self.client = Client()
@@ -28,7 +29,7 @@ class SystemApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()['is_staff'])
-        self.assertEqual(response.json()['system_permissions'], ['users.view', 'users.add'])
+        self.assertEqual(response.json()['system_permissions'], ['users.view', 'users.add', 'users.change', 'staff.view', 'staff.change'])
 
     def test_staff_operator_can_list_and_create_users(self):
         """Provision an active user and its personal namespace from the system API."""
@@ -68,6 +69,63 @@ class SystemApiTests(TestCase):
 
         self.assertEqual(current_response.json()['system_permissions'], [])
         self.assertEqual(list_response.status_code, 403)
+
+    def test_operator_can_edit_user_profile_and_staff_state(self):
+        """Delegate routine account administration without Django admin access."""
+
+        target = User.objects.create_user(username='researcher', email='old@example.org')
+        response = self.client.patch(
+            f'/api/v1/system/users/{target.id}',
+            {'email': 'new@example.org', 'first_name': 'Ada', 'last_name': 'Lovelace', 'is_staff': True},
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        target.refresh_from_db()
+        self.assertEqual(target.get_full_name(), 'Ada Lovelace')
+        self.assertEqual(target.email, 'new@example.org')
+        self.assertTrue(target.is_staff)
+        staff_response = self.client.get('/api/v1/system/staff')
+        self.assertEqual(staff_response.status_code, 200)
+        self.assertIn('researcher', [item['username'] for item in staff_response.json()['items']])
+
+    def test_delegated_operator_cannot_edit_a_superuser(self):
+        """Reserve superuser account changes for another superuser."""
+
+        superuser = User.objects.create_superuser(username='root', password='irrelevant')
+        response = self.client.patch(f'/api/v1/system/users/{superuser.id}', {'is_staff': False}, content_type='application/json')
+
+        self.assertEqual(response.status_code, 403)
+        superuser.refresh_from_db()
+        self.assertTrue(superuser.is_staff)
+
+    def test_superuser_can_manage_permission_groups(self):
+        """Expose Django groups through stable System permission names."""
+
+        superuser = User.objects.create_superuser(username='root', password='irrelevant')
+        self.client.force_login(superuser)
+        created = self.client.post(
+            '/api/v1/system/permission-groups',
+            {'name': 'Dataset auditors', 'permissions': ['datasets.view', 'users.view']},
+            content_type='application/json',
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        group_id = created.json()['id']
+        listed = self.client.get('/api/v1/system/permission-groups')
+        self.assertEqual(listed.status_code, 200)
+        self.assertIn('permission_groups.change', listed.json()['available_permissions'])
+        created_group = next(item for item in listed.json()['items'] if item['id'] == group_id)
+        self.assertEqual(set(created_group['permissions']), {'datasets.view', 'users.view', 'staff.view'})
+
+        updated = self.client.put(
+            f'/api/v1/system/permission-groups/{group_id}',
+            {'name': 'Dataset managers', 'permissions': ['datasets.view', 'datasets.change']},
+            content_type='application/json',
+        )
+        self.assertEqual(updated.status_code, 200, updated.content)
+        self.assertEqual(updated.json()['name'], 'Dataset managers')
+        deleted = self.client.delete(f'/api/v1/system/permission-groups/{group_id}')
+        self.assertEqual(deleted.status_code, 204)
 
     def test_user_creation_rejects_invalid_details_without_partial_account(self):
         """Keep user and personal-namespace creation atomic on validation failure."""

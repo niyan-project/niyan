@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SystemUser, SystemUserList } from '~/types/api'
+import type { PermissionGroupList, SystemUser, SystemUserList } from '~/types/api'
 import { NiyanApiError } from '~/composables/useApi'
 import { generateRandomPassword } from '~/utils/password'
 
@@ -11,6 +11,8 @@ const { user } = useAuth()
 const permissions = computed(() => user.value?.system_permissions || [])
 const canView = computed(() => permissions.value.includes('users.view'))
 const canAdd = computed(() => permissions.value.includes('users.add'))
+const canChange = computed(() => permissions.value.includes('users.change'))
+const canAssignGroups = computed(() => permissions.value.includes('permission_groups.change'))
 if (!canView.value && !canAdd.value) throw createError({ statusCode: 403, statusMessage: 'You cannot administer users.' })
 
 const showCreateForm = ref(false)
@@ -19,8 +21,8 @@ const saving = ref(false)
 const form = reactive({ username: '', password: '', email: '', first_name: '', last_name: '' })
 const { data: page, error, refresh } = await useAsyncData('system-users', async () => canView.value ? api.get<SystemUserList>('/api/v1/system/users?limit=100') : { count: 0, limit: 100, offset: 0, items: [] }, { lazy: false, getCachedData: () => undefined })
 const users = computed(() => page.value?.items || [])
+const { data: permissionGroupPage } = await useAsyncData('system-users-permission-groups', async () => canAssignGroups.value ? api.get<PermissionGroupList>('/api/v1/system/permission-groups') : null, { lazy: false, getCachedData: () => undefined })
 const errorMessage = computed(() => error.value instanceof NiyanApiError ? error.value.message : error.value ? 'Users could not be loaded.' : '')
-const { formatRelative } = useFormatting()
 
 function fillRandomPassword() {
   try {
@@ -49,6 +51,11 @@ async function createUser() {
   } finally {
     saving.value = false
   }
+}
+
+function replaceUser(updated: SystemUser) {
+  if (!page.value) return
+  page.value.items = page.value.items.map(account => account.id === updated.id ? updated : account)
 }
 </script>
 
@@ -87,12 +94,6 @@ async function createUser() {
     </UModal>
 
     <UAlert v-if="errorMessage" class="mt-6" color="error" variant="soft" icon="i-lucide-circle-alert" :description="errorMessage" />
-    <div v-if="canView" class="mt-6 overflow-hidden rounded-lg border border-default bg-default">
-      <div v-for="account in users" :key="account.id" class="flex flex-col gap-2 border-b border-default p-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
-        <div><div class="flex flex-wrap items-center gap-2"><h2 class="font-medium text-highlighted">{{ account.display_name }}</h2><UBadge v-if="account.is_superuser" color="primary" variant="subtle">Superuser</UBadge><UBadge v-else-if="account.is_staff" color="neutral" variant="subtle">Staff</UBadge><UBadge v-if="!account.is_active" color="error" variant="subtle">Inactive</UBadge></div><p class="mt-1 font-mono text-sm text-muted">{{ account.username }}</p><p v-if="account.email" class="mt-1 text-sm text-muted">{{ account.email }}</p></div>
-        <div class="text-sm text-muted">Joined {{ formatRelative(account.date_joined) }}</div>
-      </div>
-      <div v-if="!users.length" class="p-8 text-center text-muted">No users found.</div>
-    </div>
+    <SystemUserTable v-if="canView" class="mt-6" :users="users" :can-edit="canChange" :can-assign-groups="canAssignGroups" :permission-groups="permissionGroupPage?.items || []" @updated="replaceUser" />
   </SystemShell>
 </template>

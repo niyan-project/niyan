@@ -2,9 +2,11 @@ export type Role = 'reader' | 'contributor' | 'maintainer' | 'owner'
 
 export interface ApiErrorBody { code: string, detail: string }
 export interface CurrentUser { id: number, username: string, display_name: string, first_name?: string, last_name?: string, email: string, is_staff: boolean, is_superuser: boolean, system_permissions: SystemPermission[], authentication_method: 'session' | 'access_token', access_token: AccessTokenMetadata | null }
-export type SystemPermission = 'users.view' | 'users.add' | 'groups.view' | 'groups.add' | 'groups.change' | 'groups.delete' | 'datasets.view' | 'datasets.add' | 'datasets.change' | 'datasets.delete'
-export interface SystemUser { id: number, username: string, display_name: string, email: string, is_active: boolean, is_staff: boolean, is_superuser: boolean, date_joined: string, last_login: string | null }
+export type SystemPermission = 'users.view' | 'users.add' | 'users.change' | 'staff.view' | 'staff.change' | 'permission_groups.view' | 'permission_groups.add' | 'permission_groups.change' | 'permission_groups.delete' | 'groups.view' | 'groups.add' | 'groups.change' | 'groups.delete' | 'datasets.view' | 'datasets.add' | 'datasets.change' | 'datasets.delete'
+export interface SystemUser { id: number, username: string, display_name: string, email: string, first_name: string, last_name: string, is_active: boolean, is_staff: boolean, is_superuser: boolean, date_joined: string, last_login: string | null, permission_group_ids: number[] }
 export interface SystemUserList { count: number, limit: number, offset: number, items: SystemUser[] }
+export interface PermissionGroup { id: number, name: string, permissions: SystemPermission[] }
+export interface PermissionGroupList { count: number, available_permissions: SystemPermission[], items: PermissionGroup[] }
 export interface Namespace { id: string, parent_id: string | null, parent_path: string | null, path: string, slug: string, name: string, kind: 'personal' | 'group', role: Role | null, can_create_dataset: boolean, can_create_group: boolean, can_manage: boolean, can_delete: boolean, created_at: string, updated_at: string }
 export interface NamespaceList { count: number, limit: number, offset: number, items: Namespace[] }
 export interface Dataset { id: string, namespace_id: string, namespace_path: string, slug: string, name: string, description: string, default_branch: string, role: Role | null, can_write: boolean, can_update: boolean, can_manage_access: boolean, can_delete: boolean, created_at: string }

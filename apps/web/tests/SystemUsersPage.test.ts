@@ -16,7 +16,7 @@ describe('system users page', () => {
       email: '',
       is_staff: true,
       is_superuser: false,
-      system_permissions: ['users.view', 'users.add', 'groups.view', 'datasets.view'],
+      system_permissions: ['users.view', 'users.add', 'staff.view', 'groups.view', 'datasets.view'],
       authentication_method: 'session',
       access_token: null
     }
@@ -26,7 +26,7 @@ describe('system users page', () => {
       count: 1,
       limit: 100,
       offset: 0,
-      items: [{ id: 1, username: 'operator', display_name: 'Operator', email: '', is_active: true, is_staff: true, is_superuser: false, date_joined: '2030-01-01T00:00:00Z', last_login: null }]
+      items: [{ id: 1, username: 'operator', display_name: 'Operator', email: '', first_name: 'Operator', last_name: '', is_active: true, is_staff: true, is_superuser: false, date_joined: '2030-01-01T00:00:00Z', last_login: null, permission_group_ids: [] }]
     })
   })
 

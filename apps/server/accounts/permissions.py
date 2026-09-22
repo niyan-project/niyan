@@ -1,6 +1,13 @@
 SYSTEM_PERMISSIONS = {
     'users.view': 'accounts.view_user',
     'users.add': 'accounts.add_user',
+    'users.change': 'accounts.change_user',
+    'staff.view': 'accounts.view_user',
+    'staff.change': 'accounts.change_user',
+    'permission_groups.view': 'auth.view_group',
+    'permission_groups.add': 'auth.add_group',
+    'permission_groups.change': 'auth.change_group',
+    'permission_groups.delete': 'auth.delete_group',
     'groups.view': 'namespaces.view_namespace',
     'groups.add': 'namespaces.add_namespace',
     'groups.change': 'namespaces.change_namespace',
