@@ -131,7 +131,7 @@ def build_parser():
         command_parser.add_argument('--json', action='store_true', help='Write stable JSON to standard output.')
 
     commands.add_parser('status', help='Show dataset working-copy and LFS state.')
-    add_parser = commands.add_parser('add', help='Stage dataset paths using Niyān’s Git LFS tracking policy.')
+    add_parser = commands.add_parser('add', help='Stage dataset paths using the repository’s Git attributes.')
     add_parser.add_argument('paths', nargs='*', help='One or more Git pathspecs to stage.')
     add_parser.add_argument('--all', action='store_true', help='Stage every working-tree change.')
     add_mode = add_parser.add_mutually_exclusive_group()
@@ -181,7 +181,8 @@ def build_parser():
     pull_parser.add_argument('--include', action='append', metavar='GLOB', help='Replace the saved Git LFS include selection. Repeat for multiple globs.')
     pull_parser.add_argument('--exclude', action='append', metavar='GLOB', help='Replace the saved Git LFS exclude selection. Repeat for multiple globs.')
     pull_parser.add_argument('--metadata-only', action='store_true', help='Update Git metadata and pointer files without downloading Git LFS content.')
-    commands.add_parser('push', help='Upload required Git LFS objects and publish the current dataset branch.')
+    push_parser = commands.add_parser('push', help='Upload required Git LFS objects and publish the current dataset branch.')
+    push_parser.add_argument('--quiet', action='store_true', help='Suppress Git and Git LFS transfer progress.')
 
     cache_parser = commands.add_parser('cache', help='Inspect and safely reclaim local Git LFS storage.')
     cache_commands = cache_parser.add_subparsers(dest='cache_command', required=True)
@@ -443,7 +444,7 @@ def main(argv=None):
             )
             return 0
         if arguments.command == 'push':
-            push_dataset(paths=paths, stores=stores, cwd=Path.cwd())
+            push_dataset(paths=paths, stores=stores, quiet=arguments.quiet, cwd=Path.cwd())
             return 0
         if arguments.command == 'cache' and arguments.cache_command == 'status':
             show_cache_status(paths=paths, stores=stores, cwd=Path.cwd())

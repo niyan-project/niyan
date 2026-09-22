@@ -1057,6 +1057,7 @@ class CliGitTests(unittest.TestCase):
         self.assertEqual(lfs_command[-5:], ['lfs', 'pull', '--include=', '--exclude=', 'origin'])
         self.assertEqual(run.call_args_list[1].args[0][-4:], ['lfs', 'install', '--local', '--skip-smudge'])
         configured_names = [call.args[0][-2] for call in run.call_args_list[2:6]]
+        configured_values = {call.args[0][-2]: call.args[0][-1] for call in run.call_args_list[2:6]}
         self.assertEqual(
             configured_names,
             [
@@ -1066,6 +1067,8 @@ class CliGitTests(unittest.TestCase):
                 'lfs.customtransfer.niyan-multipart.direction',
             ],
         )
+        self.assertEqual(configured_values['lfs.customtransfer.niyan-multipart.concurrent'], 'true')
+        self.assertFalse(any('lfs.concurrenttransfers' in repr(call.args[0]) for call in run.call_args_list))
         self.assertEqual(save_identity.call_args.args[0], self.root / 'checkout')
 
     def test_full_history_clone_omits_shallow_fetch_options(self):
@@ -1240,6 +1243,30 @@ class CliGitTests(unittest.TestCase):
 
         push_command = run.call_args_list[1].args[0]
         self.assertEqual(push_command[-7:], ['-C', str(self.root), 'push', '--follow-tags', '--set-upstream', 'origin', 'experiment:refs/heads/experiment'])
+
+    def test_interactive_push_forces_visible_lfs_and_git_progress(self):
+        """Keep long-running transfers observable without an extra flag."""
+
+        class InteractiveOutput(io.StringIO):
+            """Represent an attached terminal while retaining test output."""
+
+            def isatty(self):
+                """Report an interactive terminal."""
+
+                return True
+
+        identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+        )
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git._require_checkout', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._git_output', return_value='0123456789abcdef'), patch('niyan.git._optional_current_upstream', return_value='origin/main'), patch('niyan.git.configure_lfs_transfer'), patch('niyan.git.subprocess.run', return_value=completed) as run:
+            push_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=InteractiveOutput())
+
+        self.assertEqual(run.call_args_list[0].kwargs['env']['GIT_LFS_FORCE_PROGRESS'], '1')
+        self.assertFalse(run.call_args_list[0].kwargs['capture_output'])
+        self.assertIn('--progress', run.call_args_list[1].args[0])
 
     def test_failed_lfs_publication_never_attempts_a_ref_update(self):
         """Keep the remote branch unchanged when any required LFS object is unavailable."""

@@ -364,23 +364,36 @@ class WorkingCopyTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             build_parser().parse_args(['add', '--lfs', '--git', 'data.bin'])
 
-    def test_add_classifies_text_binary_and_size_boundary(self):
-        """Apply ordinary Git, NUL sniffing, and the exact 10 MiB boundary."""
+    def test_add_delegates_default_staging_to_git_attributes(self):
+        """Avoid opening and classifying every file in a large selected tree."""
 
         (self.repository / 'small.txt').write_text('plain text\n')
         (self.repository / 'binary.dat').write_bytes(b'prefix\0suffix')
         (self.repository / 'exact.txt').write_bytes(b'a' * LFS_SIZE_THRESHOLD)
         (self.repository / 'large.txt').write_bytes(b'a' * (LFS_SIZE_THRESHOLD + 1))
 
-        with self._lfs_environment():
+        with patch('niyan.working_copy._inspect_candidate', side_effect=AssertionError('default add must not inspect files')):
             stage_paths(['small.txt', 'binary.dat', 'exact.txt', 'large.txt'], cwd=self.repository)
 
         self.assertEqual(self._git('show', ':small.txt').stdout, b'plain text\n')
+        self.assertEqual(self._git('show', ':binary.dat').stdout, b'prefix\0suffix')
         self.assertEqual(self._git('show', ':exact.txt').stdout, b'a' * LFS_SIZE_THRESHOLD)
-        self.assertTrue(self._git('show', ':binary.dat').stdout.startswith(LFS_POINTER_VERSION))
-        self.assertTrue(self._git('show', ':large.txt').stdout.startswith(LFS_POINTER_VERSION))
+        self.assertEqual(self._git('show', ':large.txt').stdout, b'a' * (LFS_SIZE_THRESHOLD + 1))
+        self.assertEqual((self.repository / '.gitattributes').read_text(), '*.bin filter=lfs diff=lfs merge=lfs -text\n')
+
+    def test_add_all_stages_thousands_of_binary_files_without_classification(self):
+        """Keep the default many-file path to one standard Git staging operation."""
+
+        fixture = self.repository / 'many-files'
+        fixture.mkdir()
+        for index in range(3000):
+            (fixture / f'image-{index:04d}.jpg').write_bytes(b'jpeg\0fixture')
+
+        with patch('niyan.working_copy._inspect_candidate', side_effect=AssertionError('default add must not inspect files')):
+            stage_paths([], all_paths=True, cwd=self.repository)
+
         staged = self._git('diff', '--cached', '--name-only').stdout.splitlines()
-        self.assertIn(b'.gitattributes', staged)
+        self.assertEqual(sum(path.startswith(b'many-files/') for path in staged), 3000)
 
     def test_add_preserves_existing_git_and_lfs_storage_modes(self):
         """Do not silently migrate tracked paths when their current content changes."""
@@ -398,11 +411,8 @@ class WorkingCopyTests(unittest.TestCase):
         self._git('reset', '--hard', 'HEAD')
         (self.repository / 'preserved.dat').write_bytes(b'original\0content')
         with self._lfs_environment():
-            stage_paths(['preserved.dat'], cwd=self.repository)
+            stage_paths(['preserved.dat'], force_lfs=True, cwd=self.repository)
         self._git('commit', '-m', 'Add LFS file')
-        (self.repository / '.gitattributes').write_text('*.bin filter=lfs diff=lfs merge=lfs -text\n')
-        self._git('add', '.gitattributes')
-        self._git('commit', '-m', 'Remove literal LFS rule')
         (self.repository / 'preserved.dat').write_text('now small text\n')
 
         with self._lfs_environment():
@@ -468,8 +478,8 @@ class WorkingCopyTests(unittest.TestCase):
         self.assertIn('"lfs-data/.gitattributes" -filter -diff -merge', attributes)
         self.assertIn('"git-data/**" -filter -diff -merge', attributes)
 
-    def test_add_preserves_an_exact_filesystem_rename_storage_mode(self):
-        """Recognize one exact LFS move even when Git has not staged the rename yet."""
+    def test_add_uses_current_attributes_for_a_filesystem_rename(self):
+        """Let Git decide storage after a path moves outside its former LFS rule."""
 
         source = self.repository / 'source.txt'
         source.write_text('small LFS text\n')
@@ -484,19 +494,14 @@ class WorkingCopyTests(unittest.TestCase):
         with self._lfs_environment():
             stage_paths(['source.txt', 'renamed.txt'], cwd=self.repository)
 
-        self.assertTrue(self._git('show', ':renamed.txt').stdout.startswith(LFS_POINTER_VERSION))
-        self.assertIn('renamed.txt filter=lfs', (self.repository / '.gitattributes').read_text())
-        self.assertIn(b'R100\tsource.txt\trenamed.txt', self._git('diff', '--cached', '--name-status', '-M').stdout)
+        self.assertEqual(self._git('show', ':renamed.txt').stdout, b'small LFS text\n')
+        self.assertNotIn('renamed.txt filter=lfs', (self.repository / '.gitattributes').read_text())
 
-    def test_add_never_places_attribute_control_files_in_lfs(self):
-        """Reject explicit and inherited attempts to filter .gitattributes itself."""
+    def test_explicit_lfs_override_never_places_attribute_control_files_in_lfs(self):
+        """Reject a Niyān-authored rule that would filter its own control file."""
 
         with self._lfs_environment(), self.assertRaisesRegex(GitError, 'must remain an ordinary Git blob'):
             stage_paths(['.gitattributes'], force_lfs=True, cwd=self.repository)
-
-        (self.repository / '.gitattributes').write_text('.gitattributes filter=lfs diff=lfs merge=lfs -text\n')
-        with self._lfs_environment(), self.assertRaisesRegex(GitError, 'must remain an ordinary Git blob'):
-            stage_paths(['.gitattributes'], cwd=self.repository)
 
     def test_git_override_treats_attribute_metacharacters_as_literal(self):
         """Persist a rule for the exact unusual filename rather than a glob."""
@@ -527,21 +532,21 @@ class WorkingCopyTests(unittest.TestCase):
         self.assertNotIn(b'ignored.dat', staged)
         self.assertEqual(self._git('ls-files', '--stage', 'link.bin').stdout.split()[0], b'120000')
 
-    def test_add_rejects_nested_repositories_and_special_entries(self):
-        """Refuse filesystem entries Git cannot safely treat as dataset files."""
+    def test_add_delegates_nested_repositories_and_special_entries_to_git(self):
+        """Preserve Git's standard handling of unsupported working-tree entries."""
 
         nested = self.repository / 'nested'
         subprocess.run(['git', 'init', str(nested)], check=True, capture_output=True)
-        with self.assertRaisesRegex(GitError, 'Nested Git repository'):
+        with self.assertRaisesRegex(GitError, 'could not stage'):
             stage_paths(['nested'], cwd=self.repository)
 
         fifo = self.repository / 'pipe'
         os.mkfifo(fifo)
-        with self.assertRaisesRegex(GitError, 'Unsupported filesystem entry'):
-            stage_paths(['pipe'], cwd=self.repository)
+        stage_paths(['pipe'], cwd=self.repository)
+        self.assertNotIn(b'pipe', self._git('diff', '--cached', '--name-only').stdout.splitlines())
 
-    def test_add_requires_git_lfs_only_when_selected_content_needs_it(self):
-        """Allow ordinary staging without Git LFS and fail before staging binary content."""
+    def test_explicit_lfs_override_requires_git_lfs(self):
+        """Allow ordinary staging without Git LFS and validate an explicit override."""
 
         (self.repository / 'ordinary.txt').write_text('text\n')
         (self.repository / 'needs-lfs.dat').write_bytes(b'binary\0content')
@@ -549,7 +554,7 @@ class WorkingCopyTests(unittest.TestCase):
         with patch('niyan.working_copy.shutil.which', side_effect=lambda executable: '/usr/bin/git' if executable == 'git' else None):
             stage_paths(['ordinary.txt'], cwd=self.repository)
             with self.assertRaisesRegex(GitError, 'Git LFS is required'):
-                stage_paths(['needs-lfs.dat'], cwd=self.repository)
+                stage_paths(['needs-lfs.dat'], force_lfs=True, cwd=self.repository)
 
         self.assertIn(b'ordinary.txt', self._git('diff', '--cached', '--name-only').stdout.splitlines())
         self.assertNotIn(b'needs-lfs.dat', self._git('diff', '--cached', '--name-only').stdout.splitlines())

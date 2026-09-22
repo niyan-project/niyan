@@ -145,7 +145,7 @@ def configure_lfs_transfer(checkout, *, environment=None, install_filters=False)
     settings = (
         ('lfs.customtransfer.niyan-multipart.path', 'niyan'),
         ('lfs.customtransfer.niyan-multipart.args', '_lfs-transfer'),
-        ('lfs.customtransfer.niyan-multipart.concurrent', 'false'),
+        ('lfs.customtransfer.niyan-multipart.concurrent', 'true'),
         ('lfs.customtransfer.niyan-multipart.direction', 'upload'),
     )
     for name, value in settings:
@@ -255,7 +255,7 @@ def pull_dataset(*, paths, stores, full_history=False, include=None, exclude=Non
         print('Pull complete.', file=stderr or sys.stderr)
 
 
-def push_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
+def push_dataset(*, paths, stores, quiet=False, cwd=None, environment=None, stderr=None):
     """Upload reachable LFS objects before publishing the current branch.
 
     Parameters
@@ -270,6 +270,8 @@ def push_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
         Parent environment override used by tests.
     stderr : file-like object, optional
         Human-facing progress destination.
+    quiet : bool, optional
+        Suppress Git and Git LFS transfer progress.
 
     Raises
     ------
@@ -284,6 +286,10 @@ def push_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
     _require_dependency('git-lfs', 'Git LFS is required to publish Niyān datasets.')
     credential = select_credential(host=identity.host, dataset_path=identity.dataset_path, dataset_id=identity.dataset_id, paths=paths, stores=stores, cwd=checkout, environment=environment)
     child_environment = _git_environment(environment)
+    output = stderr or sys.stderr
+    interactive_progress = not quiet and bool(getattr(output, 'isatty', lambda: False)())
+    if interactive_progress:
+        child_environment['GIT_LFS_FORCE_PROGRESS'] = '1'
     branch = _current_branch(checkout, child_environment, operation='push')
     _git_output(checkout, ['rev-parse', '--verify', 'HEAD'], child_environment, 'The current dataset branch has no commits to push.')
     upstream = _optional_current_upstream(checkout, branch, child_environment)
@@ -299,7 +305,7 @@ def push_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
                 cwd=checkout,
                 environment=child_environment,
                 failure='Git LFS could not publish the dataset files.',
-                capture_output=True,
+                capture_output=quiet,
             )
             if uploaded.returncode != 0:
                 raise GitError('Git LFS could not publish every required dataset file. The Git branch was not updated.')
@@ -309,6 +315,8 @@ def push_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
             push_environment['GIT_LFS_SKIP_PUSH'] = '1'
             # Annotated dataset releases reachable from the published branch travel with it, matching Git's conservative --follow-tags behavior without pushing unrelated tags.
             push_arguments = ['push', '--follow-tags']
+            if interactive_progress:
+                push_arguments.append('--progress')
             if upstream is None:
                 push_arguments.append('--set-upstream')
             push_arguments.extend([identity.remote, f'{branch}:refs/heads/{remote_branch}'])
@@ -317,14 +325,14 @@ def push_dataset(*, paths, stores, cwd=None, environment=None, stderr=None):
                 cwd=checkout,
                 environment=push_environment,
                 failure='Git could not publish the dataset branch.',
-                capture_output=True,
+                capture_output=quiet,
             )
         except KeyboardInterrupt as error:
             raise GitError('Dataset publication was interrupted. The Git branch was not reported as published.') from error
 
     if pushed.returncode != 0:
         raise GitConflictError('The remote rejected the dataset branch update. Pull the latest changes and resolve any divergence before trying again.')
-    print('Push complete.', file=stderr or sys.stderr)
+    print('Push complete.', file=output)
 
 
 def load_checkout_identity(cwd, *, validate_remote=True, run=subprocess.run):

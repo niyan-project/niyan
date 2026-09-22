@@ -181,7 +181,7 @@ class CliAlphaWorkflowTests(LiveServerTestCase):
         interrupted_content = b'\0' * (10 * MIB + 1)
         interrupted_path = source / 'interrupted.bin'
         interrupted_path.write_bytes(interrupted_content)
-        stage_paths(['interrupted.bin'], cwd=source)
+        stage_paths(['interrupted.bin'], force_lfs=True, cwd=source)
         commit_changes(message='Add interrupted object', cwd=source, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.provider.interrupt_uploads = True
         with self.assertRaises(GitError):
@@ -193,7 +193,7 @@ class CliAlphaWorkflowTests(LiveServerTestCase):
         published_tip = self._remote_tip(dataset['id'])
         missing_content = b'\1' + b'\0' * (10 * MIB)
         (source / 'missing-copy.bin').write_bytes(missing_content)
-        stage_paths(['missing-copy.bin'], cwd=source)
+        stage_paths(['missing-copy.bin'], force_lfs=True, cwd=source)
         commit_changes(message='Reference missing local object', cwd=source, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         pointer = self._git('-C', str(source), 'show', 'HEAD:missing-copy.bin').stdout
         oid = next(line.removeprefix('oid sha256:') for line in pointer.splitlines() if line.startswith('oid sha256:'))

@@ -66,7 +66,7 @@ def show_status(*, cwd=None, stdout=None):
 
 
 def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, cwd=None, stderr=None):
-    """Stage dataset changes while applying the accepted Git LFS policy.
+    """Stage dataset changes through Git and optional explicit LFS overrides.
 
     Parameters
     ----------
@@ -94,8 +94,14 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, cwd
     working_directory = Path(cwd or Path.cwd())
     _require_checkout(working_directory)
     configure_lfs_transfer(working_directory)
-    root = Path(os.fsdecode(_run_git(working_directory, ['rev-parse', '--show-toplevel'], operation='locate the working tree').stdout).strip())
     git_pathspecs = _git_pathspecs(working_directory, paths)
+    if not force_lfs and not force_git:
+        # Ordinary staging deliberately delegates file selection and clean-filter behavior to Git. In particular, never open every selected file merely to guess whether it belongs in LFS; repository .gitattributes is the standard, scalable source of truth.
+        stage_arguments = ['add', '--all'] if all_paths else ['add', '-A', '--', *git_pathspecs]
+        _run_git(working_directory, stage_arguments, operation='stage the requested dataset paths', timeout=None)
+        return
+
+    root = Path(os.fsdecode(_run_git(working_directory, ['rev-parse', '--show-toplevel'], operation='locate the working tree').stdout).strip())
     status_arguments = ['-c', 'status.relativePaths=false', 'status', '--porcelain=v2', '-z', '--untracked-files=all']
     if not all_paths:
         status_arguments.extend(['--', *git_pathspecs])
