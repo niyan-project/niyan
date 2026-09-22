@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-22
+
+### Added
+
+- Account profile editing for users' first and last names.
+- Linked breadcrumbs across nested groups and dataset repository pages.
+
+### Changed
+
+- Rendered dataset descriptions as sanitized Markdown.
+- Made generated staff-user passwords immediately visible and copyable before account creation.
+- Simplified the account settings navigation and renamed "Password and authentication" to "Password".
+- Targeted continuous-integration jobs by affected component and automated documentation deployment to GitHub Pages.
+
 ## [0.2.0] - 2026-09-22
 
 ### Added
@@ -32,6 +46,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Direct, authorized S3-compatible transfers including resilient multipart uploads.
 - Docker Compose deployment, operational health checks, and cross-component continuous integration.
 
-[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/niyan-project/niyan/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/niyan-project/niyan/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/niyan-project/niyan/releases/tag/v0.1.0

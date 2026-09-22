@@ -28,7 +28,7 @@ x-niyan-environment: &niyan-environment
   - NIYAN_LOG_FORMAT=json
 
 x-niyan-service: &niyan-service
-  image: ${NIYAN_IMAGE:-ghcr.io/niyan-project/niyan:0.2.0}
+    image: ${NIYAN_IMAGE:-ghcr.io/niyan-project/niyan:0.3.0}
   build:
     context: ..
   environment: *niyan-environment

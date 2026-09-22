@@ -56,11 +56,11 @@ If another service already owns ports 80 or 443, stop and decide which reverse p
 Download only the deployment bundle by executing the bootstrap from the exact release tag rather than a moving branch:
 
 ```shell
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/niyan-project/niyan/v0.2.0/deploy/install.sh | sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/niyan-project/niyan/v0.3.0/deploy/install.sh | sh
 cd niyan-deploy
 ```
 
-The bootstrap downloads `compose.yml`, `Caddyfile`, `.env.example`, and this runbook from the same `v0.2.0` tag, then creates a mode-0600 `.env`. It refuses to overwrite a non-empty directory and does not run Docker, invoke `sudo`, or change anything outside its destination. Pass another destination with `sh -s -- /path/to/directory`. To audit before execution, download `install.sh`, inspect it, and run it locally instead of piping it directly to `sh`.
+The bootstrap downloads `compose.yml`, `Caddyfile`, `.env.example`, and this runbook from the same `v0.3.0` tag, then creates a mode-0600 `.env`. It refuses to overwrite a non-empty directory and does not run Docker, invoke `sudo`, or change anything outside its destination. Pass another destination with `sh -s -- /path/to/directory`. To audit before execution, download `install.sh`, inspect it, and run it locally instead of piping it directly to `sh`.
 
 Generate URL-safe secrets. Hexadecimal values avoid quoting and database-URL encoding mistakes:
 
@@ -116,7 +116,7 @@ Do not call the installation ready until all of these pass:
 Record the deployed Niyān image digest after startup:
 
 ```shell
-docker image inspect ghcr.io/niyan-project/niyan:0.2.0 --format '{{index .RepoDigests 0}}'
+docker image inspect ghcr.io/niyan-project/niyan:0.3.0 --format '{{index .RepoDigests 0}}'
 ```
 
 ## Routine operation
@@ -151,7 +151,7 @@ Compose reads the gitignored `deploy/.env`. The checked-in `.env.example` contai
 
 | Variable | Meaning |
 | --- | --- |
-| `NIYAN_IMAGE` | Exact Niyān image tag. Prefer a complete release such as `0.2.0`; record the resolved digest. |
+| `NIYAN_IMAGE` | Exact Niyān image tag. Prefer a complete release such as `0.3.0`; record the resolved digest. |
 | `NIYAN_PUBLIC_HOST` | Application DNS hostname without scheme or path. |
 | `NIYAN_OBJECT_HOST` | SeaweedFS S3 DNS hostname without scheme or path. Must differ from the application hostname. |
 | `NIYAN_ACME_EMAIL` | Address used by Caddy's ACME account. |
@@ -247,7 +247,7 @@ PostgreSQL and SeaweedFS image upgrades are infrastructure upgrades distinct fro
 The published image is independent of Compose:
 
 ```shell
-docker pull ghcr.io/niyan-project/niyan:0.2.0
+docker pull ghcr.io/niyan-project/niyan:0.3.0
 ```
 
 An external deployment must run the image twice: once with its default Gunicorn command and once with `python manage.py run_lfs_maintenance`. Both instances need the same application environment and access to the same durable `NIYAN_GIT_ROOT`. Run migrations exactly once before starting the new application version.
