@@ -219,6 +219,7 @@ jobs:
           curl --fail --silent --show-error --insecure --request OPTIONS --resolve objects.localhost:58443:127.0.0.1 --header 'Origin: https://localhost' --header 'Access-Control-Request-Method: PUT' --header 'Access-Control-Request-Headers: content-type,x-amz-date,authorization' --dump-header /tmp/niyan-cors-headers --output /dev/null https://objects.localhost:58443/niyan/ci-object
           grep --fixed-strings 'access-control-allow-origin: https://localhost' /tmp/niyan-cors-headers
           docker compose -f deploy/compose.yml exec -T -e PYTHONWARNINGS=ignore server python manage.py shell -c "from django.conf import settings; from datasets.object_storage import S3ObjectStore; store = S3ObjectStore(settings.NIYAN_S3_CONFIGURATION); key = 'deployment-rehearsal/ci.txt'; payload = b'niyan deployment smoke test'; store.client.put_object(Bucket=store.configuration.bucket, Key=store._key(key), Body=payload); assert store.head(key).size == len(payload); assert store.client.get_object(Bucket=store.configuration.bucket, Key=store._key(key))['Body'].read() == payload; store.delete(key)"
+          python deploy/test_git_pipeline.py
           docker compose -f deploy/compose.yml logs --no-color maintenance | grep --fixed-strings 'failures=0'
       - name: Preserve deployment logs after failure
         if: failure()

@@ -3,9 +3,10 @@ import json
 import os
 import subprocess
 import sys
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from django.test import Client, LiveServerTestCase, RequestFactory, SimpleTestCase, TestCase, override_settings
@@ -674,7 +675,7 @@ class GitSmartHttpTests(RepositoryFixtureMixin, LiveServerTestCase):
                 {
                     'lfs.customtransfer.niyan-multipart.path': 'niyan',
                     'lfs.customtransfer.niyan-multipart.args': '_lfs-transfer',
-                    'lfs.customtransfer.niyan-multipart.concurrent': 'false',
+                    'lfs.customtransfer.niyan-multipart.concurrent': 'true',
                     'lfs.customtransfer.niyan-multipart.direction': 'upload',
                 },
             )
@@ -712,6 +713,55 @@ class GitHttpEnvironmentTests(SimpleTestCase):
         self.assertNotIn('HTTP_AUTHORIZATION', environment)
         self.assertNotIn('HTTP_X_UNTRUSTED', environment)
         self.assertNotIn('private-token', environment.values())
+
+    @override_settings(NIYAN_GIT_HTTP_MAX_REQUEST_BYTES=4096)
+    def test_unknown_length_receive_pack_uses_bounded_runner(self):
+        """Adapt HTTP/1.1 chunked pushes before invoking git-http-backend."""
+
+        request = RequestFactory().post('/git/id.git/git-receive-pack', data=b'0000', content_type='application/x-git-receive-pack-request')
+        request.META.pop('CONTENT_LENGTH')
+        process = MagicMock()
+        process.stdin = BytesIO()
+        process.stdout = BytesIO(b'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000')
+        process.poll.return_value = 0
+        repository_store = MagicMock()
+        repository_store.existing_path.return_value = Path('/srv/niyan/repositories/id.git')
+
+        with patch('datasets.git_http.subprocess.Popen', return_value=process) as popen:
+            response = GitHttpBackend(repository_store=repository_store).execute(
+                request=request,
+                dataset=type('DatasetIdentity', (), {'id': 'id'})(),
+                git_path='git-receive-pack',
+                service=RECEIVE_PACK,
+                remote_user=type('UserIdentity', (), {'pk': 42})(),
+            )
+            self.assertEqual(b''.join(response.streaming_content), b'0000')
+
+        command = popen.call_args.args[0]
+        self.assertEqual(command[:3], [sys.executable, str(Path(__file__).resolve().parents[1] / 'git_http_runner.py'), '4096'])
+        self.assertEqual(command[3], 'git')
+
+
+class GitHttpRunnerTests(SimpleTestCase):
+    """Verify unknown-length request spooling independently of Django."""
+
+    def test_runner_sets_exact_content_length_and_replays_body(self):
+        """Pass the decoded chunked body to Git with a valid CGI length."""
+
+        runner_path = Path(__file__).resolve().parents[1] / 'git_http_runner.py'
+        child_code = 'import os, sys; data = sys.stdin.buffer.read(); sys.stdout.buffer.write(os.environ["CONTENT_LENGTH"].encode() + b":" + data)'
+        result = subprocess.run([sys.executable, str(runner_path), '64', sys.executable, '-c', child_code], input=b'chunked request body', capture_output=True, check=True)
+
+        self.assertEqual(result.stdout, b'20:chunked request body')
+
+    def test_runner_rejects_body_above_hard_limit(self):
+        """Return a sanitized 413 CGI response without executing Git."""
+
+        runner_path = Path(__file__).resolve().parents[1] / 'git_http_runner.py'
+        result = subprocess.run([sys.executable, str(runner_path), '4', sys.executable, '-c', 'raise SystemExit(99)'], input=b'oversized', capture_output=True, check=True)
+
+        self.assertIn(b'Status: 413 Content Too Large', result.stdout)
+        self.assertNotIn(b'Traceback', result.stderr)
 
 
 def _basic_header(username, token):

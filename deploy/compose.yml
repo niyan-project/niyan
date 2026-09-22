@@ -7,6 +7,7 @@ x-niyan-environment: &niyan-environment
   - NIYAN_CSRF_TRUSTED_ORIGINS=https://${NIYAN_PUBLIC_HOST:?Set NIYAN_PUBLIC_HOST in deploy/.env}
   - NIYAN_DATABASE_URL=postgresql://niyan:${NIYAN_POSTGRES_PASSWORD:?Set NIYAN_POSTGRES_PASSWORD in deploy/.env}@database:5432/niyan
   - NIYAN_GIT_ROOT=/var/lib/niyan/repositories
+  - NIYAN_GIT_HTTP_MAX_REQUEST_BYTES=${NIYAN_GIT_HTTP_MAX_REQUEST_BYTES:-4294967296}
   - NIYAN_S3_ENDPOINT_URL=https://${NIYAN_OBJECT_HOST:?Set NIYAN_OBJECT_HOST in deploy/.env}
   - NIYAN_S3_REGION=${NIYAN_S3_REGION:-us-east-1}
   - NIYAN_S3_BUCKET=${NIYAN_S3_BUCKET:-niyan}

@@ -14,6 +14,7 @@ Configuration is supplied through `NIYAN_` environment variables. The Compose de
 | `NIYAN_SECRET_KEY` | Long, random Django cryptographic secret. Keep it stable and private. |
 | `NIYAN_DATABASE_URL` | PostgreSQL connection URL. |
 | `NIYAN_GIT_ROOT` | Persistent directory containing one bare Git repository per dataset. |
+| `NIYAN_GIT_HTTP_MAX_REQUEST_BYTES` | Maximum decoded size of an unknown-length Git smart-HTTP request; defaults to 4 GiB. |
 | `NIYAN_ALLOWED_HOSTS` | Hostnames Django accepts. |
 | `NIYAN_CSRF_TRUSTED_ORIGINS` | Trusted HTTPS origins for browser form submissions. |
 
@@ -30,6 +31,8 @@ Treat the bucket as private. A public bucket or public-sharing URL bypasses Niy�
 ## Bare Git repositories
 
 `NIYAN_GIT_ROOT` must point at durable local or mounted filesystem storage. It is not a cache: losing it loses dataset commit graphs, branches, tags, and LFS pointer history even if the underlying S3 objects remain.
+
+HTTP/1.1 chunked Git pushes do not carry a content length. Niyān streams those request bodies through an anonymous disk-backed temporary file before handing them to Git, capped by `NIYAN_GIT_HTTP_MAX_REQUEST_BYTES` (4 GiB by default). Ensure the application container's temporary filesystem has enough free space for the largest expected non-LFS Git pack; bulk dataset files should remain in Git LFS rather than consuming this allowance.
 
 Do not place multiple active Niyān application installations over the same Git root unless the deployment architecture explicitly provides the required shared filesystem semantics and locking.
 

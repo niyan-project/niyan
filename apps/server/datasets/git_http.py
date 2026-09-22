@@ -134,6 +134,10 @@ class GitHttpBackend:
             hooks_path = Path(__file__).resolve().with_name('git_hooks')
             command.extend(['-c', 'http.receivepack=true', '-c', f'core.hooksPath={hooks_path}'])
         command.append('http-backend')
+        if service == RECEIVE_PACK and request.method == 'POST' and not request.META.get('CONTENT_LENGTH'):
+            # git-http-backend refuses to connect receive-pack to stdin when CONTENT_LENGTH is absent. HTTP/1.1 chunked requests therefore pass through a small disk-spooling adapter that determines the decoded length without ever holding the pack in Django memory.
+            runner_path = Path(__file__).resolve().with_name('git_http_runner.py')
+            command = [sys.executable, str(runner_path), str(settings.NIYAN_GIT_HTTP_MAX_REQUEST_BYTES), *command]
         try:
             process = subprocess.Popen(
                 command,
@@ -230,9 +234,22 @@ class GitHttpBackend:
             Git backend process receiving the body.
         """
 
+        # Django wraps WSGI input in a zero-length LimitedStream when CONTENT_LENGTH is absent. Gunicorn marks decoded chunked bodies as input-terminated, so the adapter must read that underlying stream directly until EOF for this one protocol case.
+        source = request
+        if not request.META.get('CONTENT_LENGTH'):
+            source = request.META.get('wsgi.input', request)
         try:
             while True:
-                chunk = request.read(64 * 1024)
+                read_size = 64 * 1024
+                try:
+                    # Django's test WSGI stream rejects reads larger than its
+                    # remaining payload. Real WSGI streams permit them.
+                    read_size = min(read_size, len(source))
+                except (TypeError, AttributeError):
+                    pass
+                if read_size == 0:
+                    break
+                chunk = source.read(read_size)
                 if not chunk:
                     break
                 process.stdin.write(chunk)
