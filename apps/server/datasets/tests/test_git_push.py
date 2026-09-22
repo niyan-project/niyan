@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from accounts.models import AccessToken, User
 from accounts.tokens import create_access_token
-from datasets.git_push import GitPushDenied, create_push_context, enforce_pre_receive, parse_lfs_pointer, reconcile_git_pushes, record_post_receive
+from datasets.git_push import GitPushDenied, GitPushUnavailable, create_push_context, enforce_pre_receive, parse_lfs_pointer, reconcile_git_pushes, record_post_receive
 from datasets.models import AuditEvent, DatasetGrant, GitPushLfsLease, GitPushRef, LfsObject, ProtectedRefRule
 from datasets.services import create_dataset
 from namespaces.models import NamespaceMembership
@@ -218,6 +218,61 @@ class GitPushPolicyTests(TestCase):
 
         self.assertLessEqual(len(queries), 15)
         self.assertEqual(LfsObject.objects.filter(dataset=self.dataset, state=LfsObject.State.REFERENCED).count(), 19000)
+
+    def test_post_receive_rejects_an_update_that_pre_receive_did_not_validate(self):
+        """Never accept a ref identity merely because its ref name was validated."""
+
+        now = timezone.now()
+        context = create_push_context(dataset=self.dataset, access_token=self.access_token)
+        context.consumed_at = now
+        context.validated_at = now
+        context.save(update_fields=['consumed_at', 'validated_at'])
+        push_ref = GitPushRef.objects.create(push_context=context, ref_name='refs/heads/main', old_oid='0' * 40, new_oid='a' * 40)
+
+        with self.assertRaisesRegex(GitPushUnavailable, 'temporarily unavailable'):
+            record_post_receive(
+                context_id=context.id,
+                dataset_id=self.dataset.id,
+                lines=[f'{"0" * 40} {"b" * 40} refs/heads/main\n'],
+                repository_path=self.repository,
+            )
+
+        context.refresh_from_db()
+        push_ref.refresh_from_db()
+        self.assertIsNone(context.completed_at)
+        self.assertIsNone(push_ref.accepted_at)
+        self.assertFalse(AuditEvent.objects.filter(action='git.ref_mutation', request_id=context.request_id).exists())
+
+    def test_post_receive_replay_is_idempotent_after_bulk_acceptance(self):
+        """Replay accepted bookkeeping without duplicate events or state changes."""
+
+        now = timezone.now()
+        context = create_push_context(dataset=self.dataset, access_token=self.access_token)
+        context.consumed_at = now
+        context.validated_at = now
+        context.save(update_fields=['consumed_at', 'validated_at'])
+        push_ref = GitPushRef.objects.create(push_context=context, ref_name='refs/heads/main', old_oid='0' * 40, new_oid='a' * 40)
+        lfs_object = LfsObject.objects.create(
+            dataset=self.dataset,
+            oid='c' * 64,
+            size=12,
+            state=LfsObject.State.AVAILABLE,
+            verification_method=LfsObject.VerificationMethod.SIZE,
+            available_at=now,
+        )
+        GitPushLfsLease.objects.create(push_ref=push_ref, lfs_object=lfs_object, expires_at=context.expires_at)
+        update = f'{"0" * 40} {"a" * 40} refs/heads/main\n'
+
+        record_post_receive(context_id=context.id, dataset_id=self.dataset.id, lines=[update], repository_path=self.repository)
+        record_post_receive(context_id=context.id, dataset_id=self.dataset.id, lines=[update], repository_path=self.repository)
+
+        context.refresh_from_db()
+        push_ref.refresh_from_db()
+        lfs_object.refresh_from_db()
+        self.assertIsNotNone(context.completed_at)
+        self.assertIsNotNone(push_ref.accepted_at)
+        self.assertEqual(lfs_object.state, LfsObject.State.REFERENCED)
+        self.assertEqual(AuditEvent.objects.filter(action='git.ref_mutation', request_id=context.request_id).count(), 1)
 
     def test_force_update_default_deletion_tag_update_and_other_namespaces_are_denied(self):
         """Apply the immutable baseline even when a client explicitly requests force."""
