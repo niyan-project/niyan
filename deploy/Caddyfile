@@ -1,0 +1,12 @@
+{
+	email {$NIYAN_ACME_EMAIL}
+}
+
+{$NIYAN_PUBLIC_HOST} {
+	encode zstd gzip
+	reverse_proxy server:8000
+}
+
+{$NIYAN_OBJECT_HOST} {
+	reverse_proxy object-storage:8333
+}
