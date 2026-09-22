@@ -1,0 +1,233 @@
+:root {
+  --vp-c-brand-1: #4f46e5;
+  --vp-c-brand-2: #4338ca;
+  --vp-c-brand-3: #3730a3;
+  --vp-c-brand-soft: rgba(79, 70, 229, 0.14);
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-alt: #f7f7f8;
+  --vp-c-bg-elv: #ffffff;
+  --vp-c-bg-soft: #f1f1f3;
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #312e81 15%, #4f46e5 55%, #7c3aed 100%);
+  --vp-home-hero-image-background-image: radial-gradient(circle at center, rgba(79, 70, 229, 0.24), transparent 68%);
+  --vp-home-hero-image-filter: blur(44px);
+  --niyan-terminal-bg: #111113;
+  --niyan-terminal-border: #2b2b30;
+}
+
+.niyan-audience-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.niyan-audience-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 1.5rem;
+  color: var(--vp-c-text-1) !important;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  text-decoration: none !important;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.niyan-audience-card:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+}
+
+.niyan-audience-card strong {
+  color: var(--vp-c-brand-1);
+  font-size: 1.2rem;
+}
+
+.niyan-audience-label {
+  color: var(--vp-c-text-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 640px) {
+  .niyan-audience-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dark {
+  --vp-c-brand-1: #a5b4fc;
+  --vp-c-brand-2: #818cf8;
+  --vp-c-brand-3: #6366f1;
+  --vp-c-brand-soft: rgba(129, 140, 248, 0.14);
+  --vp-c-bg: #0b0b0d;
+  --vp-c-bg-alt: #111113;
+  --vp-c-bg-elv: #17171a;
+  --vp-c-bg-soft: #1c1c20;
+  --vp-c-divider: #2b2b30;
+  --vp-c-gutter: #111113;
+  --vp-home-hero-name-background: linear-gradient(120deg, #c7d2fe 5%, #818cf8 55%, #a78bfa 100%);
+}
+
+body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.VPNavBarTitle .logo {
+  border-radius: 9px;
+}
+
+.VPHomeHero {
+  padding-top: 96px;
+}
+
+.VPHomeHero .name,
+.VPHomeHero .text {
+  letter-spacing: -0.04em;
+}
+
+.VPHomeHero .text {
+  max-width: 720px;
+}
+
+.VPHomeHero .tagline {
+  max-width: 660px;
+  line-height: 1.65;
+}
+
+@media (min-width: 960px) {
+  .VPHomeHero .image-container {
+    transform: translate(32px, -32px);
+  }
+}
+
+.VPHomeFeatures .VPFeature {
+  border-color: var(--vp-c-divider);
+  background-color: var(--vp-c-bg-soft);
+  transition: border-color 180ms ease, transform 180ms ease;
+}
+
+.VPHomeFeatures .VPFeature:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+}
+
+.niyan-home-section {
+  margin: 56px auto 0;
+  max-width: 1152px;
+  padding: 0 24px;
+}
+
+.niyan-home-section h2 {
+  max-width: 720px;
+  border: 0;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+
+.niyan-home-section > p {
+  max-width: 700px;
+  color: var(--vp-c-text-2);
+  font-size: 1.05rem;
+  line-height: 1.75;
+}
+
+.niyan-workflow {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 48px;
+  align-items: center;
+  margin-top: 96px;
+  margin-bottom: 96px;
+}
+
+.niyan-workflow h2 {
+  margin-top: 0;
+}
+
+.niyan-terminal {
+  overflow: hidden;
+  border: 1px solid var(--niyan-terminal-border);
+  border-radius: 14px;
+  background: var(--niyan-terminal-bg);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
+}
+
+.niyan-terminal-bar {
+  display: flex;
+  gap: 7px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--niyan-terminal-border);
+}
+
+.niyan-terminal-bar span {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #52525b;
+}
+
+.niyan-terminal pre {
+  overflow-x: auto;
+  margin: 0;
+  padding: 24px;
+  color: #e4e4e7;
+  background: transparent;
+  font-size: 0.86rem;
+  line-height: 1.8;
+}
+
+.niyan-terminal .prompt {
+  color: #a5b4fc;
+}
+
+.niyan-trust {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin: 32px 0 96px;
+}
+
+.niyan-trust article {
+  padding: 24px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  background: var(--vp-c-bg-soft);
+}
+
+.niyan-trust h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.niyan-trust p {
+  margin: 0;
+  color: var(--vp-c-text-2);
+  font-size: 0.94rem;
+  line-height: 1.65;
+}
+
+@media (max-width: 768px) {
+  .VPHomeHero {
+    padding-top: 64px;
+  }
+
+  .niyan-home-section {
+    padding: 0 20px;
+  }
+
+  .niyan-workflow,
+  .niyan-trust {
+    grid-template-columns: 1fr;
+  }
+
+  .niyan-workflow {
+    gap: 28px;
+    margin-top: 64px;
+  }
+}

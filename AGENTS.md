@@ -12,8 +12,8 @@ Niyān builds around Git. It must not create a second, competing model of commit
 
 ## Sources of Truth
 
-- Accepted behavior and protocol requirements belong in `docs/specs/`.
-- Durable architectural choices and their tradeoffs belong in `docs/architecture/decisions/`.
+- Accepted behavior and protocol requirements belong in the [Wiki specification index](https://github.com/niyan-project/niyan/wiki/Specifications).
+- Durable architectural choices and their tradeoffs belong in the [Wiki architecture decision index](https://github.com/niyan-project/niyan/wiki/Architecture-Decisions).
 - Code and executable tests describe what is implemented now.
 - Component READMEs and checked-in tool configuration define actual development commands and style.
 - This file is an operating guide, not a substitute for the specifications.
@@ -49,8 +49,7 @@ plugins/examples/               Example viewer plugins
 contracts/                      Shared and generated API contracts
 tests/e2e/                      Cross-component workflow tests
 deploy/                         Docker Compose and deployment assets
-docs/specs/                     Product and protocol specifications
-docs/architecture/decisions/    Architecture decision records
+docs/                           Public landing page and user documentation
 ```
 
 Keep component boundaries real:
@@ -163,8 +162,8 @@ Do not invent formatter, package-manager, migration, or test commands before the
 
 ## Documentation
 
-- Begin with the [specification index](docs/specs/README.md).
-- Record architectural decisions in the [ADR index](docs/architecture/decisions/README.md).
+- Begin with the [Wiki specification index](https://github.com/niyan-project/niyan/wiki/Specifications).
+- Record architectural decisions in the [Wiki architecture decision index](https://github.com/niyan-project/niyan/wiki/Architecture-Decisions).
 - Use repository-relative links inside documentation.
 - Prefer examples that use fictitious data and credentials.
 - Mark unresolved design choices explicitly instead of presenting guesses as settled requirements.

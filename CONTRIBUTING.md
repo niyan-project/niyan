@@ -6,7 +6,7 @@ Thank you for helping improve Niyān. The project welcomes focused bug reports, 
 
 Search the issue tracker before opening a new issue. For a substantial feature or architectural change, open an issue first so its product behavior and boundaries can be agreed before implementation. Security reports must follow [SECURITY.md](SECURITY.md).
 
-Read the relevant files in `docs/specs/` and `docs/architecture/decisions/`. Accepted specifications define intended behavior; implementation and executable tests define what exists today. A public behavior change should update both.
+Read the relevant [specifications](https://github.com/niyan-project/niyan/wiki/Specifications) and [architecture decisions](https://github.com/niyan-project/niyan/wiki/Architecture-Decisions) in the project Wiki. Accepted specifications define intended behavior; implementation and executable tests define what exists today. A public behavior change should update both.
 
 ## Development
 
@@ -21,7 +21,7 @@ Keep changes cohesive and avoid unrelated cleanup. Add the smallest test that de
 
 Run the Django and cross-component suite with `./apps/server/test` from the repository root. It provisions an ephemeral Dockerized PostgreSQL instance and is the supported server test path; SQLite is not a supported development or test backend.
 
-The [coverage policy](docs/coverage.md) defines the component baselines, risk priorities, exclusions, and CI ratchet. Coverage improvements must come from meaningful behavioral assertions rather than superficial execution or a reduced test scope.
+The [Wiki coverage policy](https://github.com/niyan-project/niyan/wiki/Coverage-Policy) defines the component baselines, risk priorities, exclusions, and CI ratchet. Coverage improvements must come from meaningful behavioral assertions rather than superficial execution or a reduced test scope.
 
 Commit messages use [Conventional Commits](https://www.conventionalcommits.org/). Pull requests should explain the problem, the chosen behavior, verification performed, and any operational or compatibility impact. A maintainer may ask that a large pull request be split into independently reviewable changes.
 

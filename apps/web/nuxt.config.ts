@@ -30,7 +30,7 @@ export default defineNuxtConfig({
     buildAssetsDir: '/static/niyan/',
     head: {
       titleTemplate: '%s · Niyān',
-      link: [{ rel: 'icon', href: '/static/niyan/favicon.svg', type: 'image/svg+xml' }]
+      link: [{ rel: 'icon', href: '/static/niyan/favicon.svg?v=2', type: 'image/svg+xml' }]
     }
   },
 

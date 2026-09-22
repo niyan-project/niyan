@@ -10,7 +10,7 @@ The `niyan` Python package combines the recommended command-line experience with
 
 ## Project status
 
-Niyān is under active development and has not reached a stable v1 release. Interfaces may still change between pre-release versions. The accepted product and protocol behavior lives in the [specification index](docs/specs/README.md), architectural decisions live in the [ADR index](docs/architecture/decisions/README.md), and user-facing release changes are recorded in the [changelog](CHANGELOG.md).
+Niyān is under active development and has not reached a stable v1 release. Interfaces may still change between pre-release versions. The accepted product and protocol behavior lives in the [Wiki specification index](https://github.com/niyan-project/niyan/wiki/Specifications), architectural decisions live in the [Wiki architecture decision index](https://github.com/niyan-project/niyan/wiki/Architecture-Decisions), and user-facing release changes are recorded in the [changelog](CHANGELOG.md).
 
 ## Repository layout
 
@@ -18,9 +18,11 @@ Niyān is under active development and has not reached a stable v1 release. Inte
 - `apps/web/` — Nuxt dashboard
 - `clients/python/` — unified `niyan` CLI and Python filesystem client
 - `deploy/` — Docker Compose and operations guidance
-- `docs/` — product specifications and architectural decisions
+- `docs/` — public landing page and user documentation
 
 Component setup is documented in each component README. Production operators should begin with the [Docker Compose deployment guide](deploy/README.md).
+
+Versioned server images are published at `ghcr.io/niyan-project/niyan`. The default Compose deployment combines that image with PostgreSQL, SeaweedFS object storage, Caddy automatic HTTPS, and durable volumes; operators with existing infrastructure can run the same image directly.
 
 ## Contributing and support
 
@@ -28,4 +30,4 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. General suppo
 
 Niyān is licensed under the [Apache License 2.0](LICENSE).
 
-Maintainers publish the unified Python package using the documented [release process](RELEASING.md).
+Maintainers publish the unified Python package and server image using the documented [release process](RELEASING.md).
