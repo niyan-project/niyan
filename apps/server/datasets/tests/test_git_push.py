@@ -3,7 +3,9 @@ from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.models import AccessToken, User
@@ -185,6 +187,37 @@ class GitPushPolicyTests(TestCase):
         self.assertEqual(lfs_object.state, LfsObject.State.REFERENCED)
         self.assertIsNotNone(context.ref_updates.get().accepted_at)
         self.assertIsNotNone(context.completed_at)
+
+    def test_post_receive_promotes_many_lfs_objects_with_bounded_queries(self):
+        """Keep bookkeeping independent of the number of accepted LFS pointers."""
+
+        now = timezone.now()
+        context = create_push_context(dataset=self.dataset, access_token=self.access_token)
+        context.consumed_at = now
+        context.validated_at = now
+        context.save(update_fields=['consumed_at', 'validated_at'])
+        push_ref = GitPushRef.objects.create(push_context=context, ref_name='refs/heads/main', old_oid='0' * 40, new_oid='a' * 40)
+        objects = LfsObject.objects.bulk_create(
+            [
+                LfsObject(
+                    dataset=self.dataset,
+                    oid=f'{index:064x}',
+                    size=index + 1,
+                    state=LfsObject.State.AVAILABLE,
+                    verification_method=LfsObject.VerificationMethod.SIZE,
+                    available_at=now,
+                )
+                for index in range(19000)
+            ]
+        )
+        GitPushLfsLease.objects.bulk_create([GitPushLfsLease(push_ref=push_ref, lfs_object=lfs_object, expires_at=context.expires_at) for lfs_object in objects])
+        update = f'{"0" * 40} {"a" * 40} refs/heads/main\n'
+
+        with CaptureQueriesContext(connection) as queries:
+            record_post_receive(context_id=context.id, dataset_id=self.dataset.id, lines=[update], repository_path=self.repository)
+
+        self.assertLessEqual(len(queries), 15)
+        self.assertEqual(LfsObject.objects.filter(dataset=self.dataset, state=LfsObject.State.REFERENCED).count(), 19000)
 
     def test_force_update_default_deletion_tag_update_and_other_namespaces_are_denied(self):
         """Apply the immutable baseline even when a client explicitly requests force."""

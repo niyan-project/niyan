@@ -554,14 +554,18 @@ def _accept_updates(*, context_id, dataset_id, updates, complete):
         context = GitPushContext.objects.select_for_update(of=('self',)).select_related('dataset__namespace', 'user', 'access_token').filter(pk=context_id, dataset_id=dataset_id, validated_at__isnull=False).first()
         if context is None:
             raise GitPushUnavailable('Repository policy is temporarily unavailable.')
-        accepted_refs = []
-        for update in updates:
-            push_ref = context.ref_updates.select_for_update().filter(ref_name=update.ref_name, old_oid=update.old_oid, new_oid=update.new_oid).first()
-            if push_ref is None:
-                raise GitPushUnavailable('Repository policy is temporarily unavailable.')
-            if push_ref.accepted_at is None:
+        proposed_by_identity = {(update.ref_name, update.old_oid, update.new_oid): update for update in updates}
+        matching_refs = list(context.ref_updates.select_for_update().filter(ref_name__in=[update.ref_name for update in updates]))
+        refs_by_identity = {(push_ref.ref_name, push_ref.old_oid, push_ref.new_oid): push_ref for push_ref in matching_refs}
+        if proposed_by_identity.keys() - refs_by_identity.keys():
+            raise GitPushUnavailable('Repository policy is temporarily unavailable.')
+
+        accepted_refs = [refs_by_identity[identity] for identity in proposed_by_identity]
+        newly_accepted_refs = [push_ref for push_ref in accepted_refs if push_ref.accepted_at is None]
+        if newly_accepted_refs:
+            GitPushRef.objects.filter(pk__in=[push_ref.pk for push_ref in newly_accepted_refs], accepted_at__isnull=True).update(accepted_at=now)
+            for push_ref in newly_accepted_refs:
                 push_ref.accepted_at = now
-                push_ref.save(update_fields=['accepted_at'])
                 record_audit_event(
                     action='git.ref_mutation',
                     actor=context.user,
@@ -569,20 +573,14 @@ def _accept_updates(*, context_id, dataset_id, updates, complete):
                     request_id=context.request_id,
                     scope=AuditEvent.Scope.DATASET,
                     dataset=context.dataset,
-                    ref_name=update.ref_name,
-                    payload={'old_oid': update.old_oid, 'new_oid': update.new_oid},
+                    ref_name=push_ref.ref_name,
+                    payload={'old_oid': push_ref.old_oid, 'new_oid': push_ref.new_oid},
                     deduplication_key=f'git-ref-accepted:{push_ref.pk}',
                 )
-            accepted_refs.append(push_ref)
 
+        # This is deliberately one PostgreSQL update regardless of pointer count. Saving every object separately made post-receive runtime proportional to datasets with many LFS files and could outlive the HTTP worker after Git had already accepted the refs.
         lfs_ids = GitPushLfsLease.objects.filter(push_ref__in=accepted_refs).values_list('lfs_object_id', flat=True)
-        lfs_objects = LfsObject.objects.select_for_update().filter(pk__in=lfs_ids)
-        for lfs_object in lfs_objects:
-            if lfs_object.state == LfsObject.State.AVAILABLE:
-                lfs_object.state = LfsObject.State.REFERENCED
-                lfs_object.referenced_at = now
-                lfs_object.full_clean()
-                lfs_object.save(update_fields=['state', 'referenced_at', 'updated_at'])
+        LfsObject.objects.select_for_update().filter(pk__in=lfs_ids, state=LfsObject.State.AVAILABLE).update(state=LfsObject.State.REFERENCED, referenced_at=now, updated_at=now)
         if complete and context.completed_at is None:
             context.completed_at = now
             context.save(update_fields=['completed_at'])
