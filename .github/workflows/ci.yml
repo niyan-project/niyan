@@ -13,8 +13,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect affected components
+    runs-on: ubuntu-24.04
+    outputs:
+      server: ${{ steps.classify.outputs.server }}
+      python_client: ${{ steps.classify.outputs.python_client }}
+      web: ${{ steps.classify.outputs.web }}
+      container: ${{ steps.classify.outputs.container }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: python .github/scripts/classify_ci_changes.py --event "$EVENT_NAME" --before "$BEFORE_SHA" --base "$BASE_SHA" --head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
   server:
     name: Django, Git, Git LFS, and end-to-end
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -57,6 +80,8 @@ jobs:
 
   python-client:
     name: Python client (${{ matrix.python-version }})
+    needs: changes
+    if: needs.changes.outputs.python_client == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -109,6 +134,8 @@ jobs:
 
   web:
     name: Nuxt checks and build
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -136,7 +163,13 @@ jobs:
   container:
     name: Production image
     runs-on: ubuntu-24.04
-    needs: [server, python-client, web]
+    needs: [changes, server, web]
+    if: >-
+      always() &&
+      needs.changes.result == 'success' &&
+      needs.changes.outputs.container == 'true' &&
+      (needs.server.result == 'success' || needs.server.result == 'skipped') &&
+      (needs.web.result == 'success' || needs.web.result == 'skipped')
     env:
       NIYAN_IMAGE: niyan:ci
       NIYAN_PUBLIC_HOST: localhost
