@@ -33,7 +33,7 @@ name = sys.argv[-1].rsplit('/', 1)[-1]
 content = {
     'compose.yml': 'name: niyan\\n',
     'Caddyfile': '{$NIYAN_PUBLIC_HOST} { respond \\"test\\" }\\n',
-    '.env.example': 'NIYAN_IMAGE=ghcr.io/niyan-project/niyan:0.3.0\\n',
+    '.env.example': 'NIYAN_IMAGE=ghcr.io/niyan-project/niyan:0.4.0\\n',
     'README.md': '# Deployment\\n',
 }[name]
 output.write_text(content)

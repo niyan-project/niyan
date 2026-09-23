@@ -231,7 +231,7 @@ class CliDispatchTests(unittest.TestCase):
 
         completed = subprocess.run([sys.executable, '-m', 'niyan', '--version'], check=True, capture_output=True, text=True)
 
-        self.assertRegex(completed.stdout, r'^niyan 0\.3\.0\n$')
+        self.assertRegex(completed.stdout, r'^niyan 0\.4\.0\n$')
 
 
 if __name__ == '__main__':

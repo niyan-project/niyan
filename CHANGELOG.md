@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-22
+
+### Added
+
+- Delegated system administration for Niyān users, datasets, groups, staff accounts, and Django permission groups.
+- Native Git and Git LFS progress during interactive `niyan push`, with an explicit quiet mode.
+
+### Changed
+
+- Made `niyan add` delegate to Git by default so repository `.gitattributes` rules remain authoritative without per-file classification overhead.
+- Enabled concurrent independent-object Git LFS transfers using the standard `lfs.concurrenttransfers` setting and an eight-worker default.
+- Batched accepted-ref and Git LFS post-receive bookkeeping so many-file pushes use a bounded number of PostgreSQL queries.
+
+### Fixed
+
+- Accepted chunked Git smart-HTTP push bodies through the production Caddy and Gunicorn deployment path.
+
 ## [0.3.0] - 2026-09-22
 
 ### Added
@@ -46,7 +63,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Direct, authorized S3-compatible transfers including resilient multipart uploads.
 - Docker Compose deployment, operational health checks, and cross-component continuous integration.
 
-[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/niyan-project/niyan/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/niyan-project/niyan/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/niyan-project/niyan/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/niyan-project/niyan/releases/tag/v0.1.0

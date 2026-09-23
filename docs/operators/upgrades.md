@@ -5,7 +5,7 @@ description: Upgrade a Niyān installation safely between pinned releases.
 
 # Upgrade
 
-Niyān publishes versioned container images to GitHub Container Registry. Always deploy an exact semantic version such as `0.3.0`; do not base production on `latest`.
+Niyān publishes versioned container images to GitHub Container Registry. Always deploy an exact semantic version such as `0.4.0`; do not base production on `latest`.
 
 ## Before upgrading
 
