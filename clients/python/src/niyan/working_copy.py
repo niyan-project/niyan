@@ -65,7 +65,7 @@ def show_status(*, cwd=None, stdout=None):
     return status
 
 
-def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, cwd=None, stderr=None):
+def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, verbose=False, cwd=None, stderr=None):
     """Stage dataset changes through Git and optional explicit LFS overrides.
 
     Parameters
@@ -78,6 +78,8 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, cwd
         Persist Git LFS rules for selected regular files.
     force_git : bool, optional
         Persist ordinary-Git rules for selected regular files.
+    verbose : bool, optional
+        Print each path as Git stages it.
     cwd : pathlib.Path, optional
         Directory inside the Niyān checkout.
     stderr : file-like object, optional
@@ -97,8 +99,11 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, cwd
     git_pathspecs = _git_pathspecs(working_directory, paths)
     if not force_lfs and not force_git:
         # Ordinary staging deliberately delegates file selection and clean-filter behavior to Git. In particular, never open every selected file merely to guess whether it belongs in LFS; repository .gitattributes is the standard, scalable source of truth.
-        stage_arguments = ['add', '--all'] if all_paths else ['add', '-A', '--', *git_pathspecs]
-        _run_git(working_directory, stage_arguments, operation='stage the requested dataset paths', timeout=None)
+        stage_arguments = ['add']
+        if verbose:
+            stage_arguments.append('--verbose')
+        stage_arguments.extend(['--all'] if all_paths else ['-A', '--', *git_pathspecs])
+        _run_git(working_directory, stage_arguments, operation='stage the requested dataset paths', capture_output=not verbose, timeout=None)
         return
 
     root = Path(os.fsdecode(_run_git(working_directory, ['rev-parse', '--show-toplevel'], operation='locate the working tree').stdout).strip())
@@ -179,13 +184,16 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, cwd
     for candidate, _, _ in planned:
         _verify_candidate_unchanged(root, candidate)
 
-    stage_arguments = ['add', '-A']
+    stage_arguments = ['add']
+    if verbose:
+        stage_arguments.append('--verbose')
     if all_paths:
-        stage_arguments = ['add', '--all']
+        stage_arguments.append('--all')
     else:
+        stage_arguments.append('-A')
         selected = [str(path) for path in sorted(changed_attributes)]
         stage_arguments.extend(['--', *git_pathspecs, *selected])
-    _run_git(working_directory, stage_arguments, operation='stage the requested dataset paths', timeout=None)
+    _run_git(working_directory, stage_arguments, operation='stage the requested dataset paths', capture_output=not verbose, timeout=None)
 
 
 def _git_pathspecs(working_directory, paths):

@@ -131,7 +131,7 @@ class CliDispatchTests(unittest.TestCase):
 
         cases = [
             (['status'], 'show_status', {}),
-            (['add', '--all'], 'stage_paths', {'paths': [], 'all_paths': True, 'force_lfs': False, 'force_git': False}),
+            (['add', '--all', '--verbose'], 'stage_paths', {'paths': [], 'all_paths': True, 'force_lfs': False, 'force_git': False, 'verbose': True}),
             (['add', '--lfs', 'large.bin'], 'stage_paths', {'paths': ['large.bin'], 'all_paths': False, 'force_lfs': True, 'force_git': False}),
             (['restore', '--staged', 'data.csv'], 'restore_paths', {'paths': ['data.csv'], 'staged': True}),
             (['commit', '-m', 'Add data'], 'commit_changes', {'message': 'Add data'}),

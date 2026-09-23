@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import niyan.working_copy as working_copy
 from niyan.cli import build_parser, main
 from niyan.config import CheckoutIdentity, Configuration, find_local_config
 from niyan.errors import GitConflictError, GitError
@@ -355,11 +356,12 @@ class WorkingCopyTests(unittest.TestCase):
         """Keep the accepted staging grammar available through the public CLI."""
 
         paths = build_parser().parse_args(['add', '--lfs', 'raw/image.dat'])
-        everything = build_parser().parse_args(['add', '--all', '--git'])
+        everything = build_parser().parse_args(['add', '--all', '--verbose', '--git'])
 
         self.assertEqual(paths.paths, ['raw/image.dat'])
         self.assertTrue(paths.lfs)
         self.assertTrue(everything.all)
+        self.assertTrue(everything.verbose)
         self.assertTrue(everything.git)
         with self.assertRaises(SystemExit):
             build_parser().parse_args(['add', '--lfs', '--git', 'data.bin'])
@@ -380,6 +382,18 @@ class WorkingCopyTests(unittest.TestCase):
         self.assertEqual(self._git('show', ':exact.txt').stdout, b'a' * LFS_SIZE_THRESHOLD)
         self.assertEqual(self._git('show', ':large.txt').stdout, b'a' * (LFS_SIZE_THRESHOLD + 1))
         self.assertEqual((self.repository / '.gitattributes').read_text(), '*.bin filter=lfs diff=lfs merge=lfs -text\n')
+
+    def test_add_verbose_streams_git_staging_output(self):
+        """Delegate requested per-path output directly to Git."""
+
+        (self.repository / 'visible.txt').write_text('show this path\n')
+
+        with patch('niyan.working_copy._run_git', wraps=working_copy._run_git) as run_git:
+            stage_paths([], all_paths=True, verbose=True, cwd=self.repository)
+
+        _, arguments = run_git.call_args_list[-1].args[:2]
+        self.assertEqual(arguments, ['add', '--verbose', '--all'])
+        self.assertFalse(run_git.call_args_list[-1].kwargs['capture_output'])
 
     def test_add_all_stages_thousands_of_binary_files_without_classification(self):
         """Keep the default many-file path to one standard Git staging operation."""

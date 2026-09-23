@@ -2,6 +2,7 @@ import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DatasetView from '~/components/DatasetView.vue'
+import { NiyanApiError } from '~/composables/useApi'
 import type { Dataset } from '~/types/api'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
@@ -92,6 +93,22 @@ describe('dataset repository view', () => {
 
     const entry = wrapper.findAll('button').find(button => button.text().includes('notes.txt'))
     expect(entry?.attributes('type')).toBe('button')
+  })
+
+  it('shows verbose staging in both empty-dataset setup guides', async () => {
+    currentRoute.fullPath = '/lab/images?tab=files&empty=1'
+    api.get.mockImplementation((url: string) => {
+      if (url.includes('/drafts?')) return Promise.resolve({ items: [] })
+      if (url.includes('/repository/refs?')) return Promise.resolve({ items: [] })
+      if (url.includes('/repository/tree?')) return Promise.reject(new NiyanApiError(404, { code: 'revision_not_found' }))
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    const wrapper = await mountSuspended(DatasetView, { props: { dataset }, route: '/lab/images?tab=files' })
+    await flushPromises()
+
+    expect(wrapper.get('pre').text()).toContain('niyan add --all --verbose')
+    await wrapper.findAll('button').find(button => button.text().includes('Upload existing files'))!.trigger('click')
+    expect(wrapper.get('pre').text()).toContain('niyan add --all --verbose')
   })
 
   it('links every dataset breadcrumb and renders its description as safe Markdown', async () => {

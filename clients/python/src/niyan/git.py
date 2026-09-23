@@ -287,8 +287,8 @@ def push_dataset(*, paths, stores, quiet=False, cwd=None, environment=None, stde
     credential = select_credential(host=identity.host, dataset_path=identity.dataset_path, dataset_id=identity.dataset_id, paths=paths, stores=stores, cwd=checkout, environment=environment)
     child_environment = _git_environment(environment)
     output = stderr or sys.stderr
-    interactive_progress = not quiet and bool(getattr(output, 'isatty', lambda: False)())
-    if interactive_progress:
+    show_progress = not quiet
+    if show_progress:
         child_environment['GIT_LFS_FORCE_PROGRESS'] = '1'
     branch = _current_branch(checkout, child_environment, operation='push')
     _git_output(checkout, ['rev-parse', '--verify', 'HEAD'], child_environment, 'The current dataset branch has no commits to push.')
@@ -315,7 +315,7 @@ def push_dataset(*, paths, stores, quiet=False, cwd=None, environment=None, stde
             push_environment['GIT_LFS_SKIP_PUSH'] = '1'
             # Annotated dataset releases reachable from the published branch travel with it, matching Git's conservative --follow-tags behavior without pushing unrelated tags.
             push_arguments = ['push', '--follow-tags']
-            if interactive_progress:
+            if show_progress:
                 push_arguments.append('--progress')
             if upstream is None:
                 push_arguments.append('--set-upstream')

@@ -34,8 +34,8 @@ const installationUrl = computed(() => String(runtimeConfig.public.installationU
 const authLoginCommand = computed(() => `niyan auth login ${installationUrl.value}`)
 const cloneCommand = computed(() => `niyan dataset clone ${datasetPath.value}`)
 const cloneUrl = computed(() => `${installationUrl.value}/git/${props.dataset.id}.git`)
-const newDatasetCommands = computed(() => `${authLoginCommand.value}\n${cloneCommand.value}\ncd ${props.dataset.slug}\n# Add files to this directory, then:\nniyan add --all\nniyan commit -m "Initial dataset"\nniyan push`)
-const existingDatasetCommands = computed(() => `${authLoginCommand.value}\nniyan dataset clone ${datasetPath.value} ${props.dataset.slug}-upload\ncp -R /path/to/your/files/. ${props.dataset.slug}-upload/\ncd ${props.dataset.slug}-upload\nniyan add --all\nniyan commit -m "Initial dataset"\nniyan push`)
+const newDatasetCommands = computed(() => `${authLoginCommand.value}\n${cloneCommand.value}\ncd ${props.dataset.slug}\n# Add files to this directory, then:\nniyan add --all --verbose\nniyan commit -m "Initial dataset"\nniyan push`)
+const existingDatasetCommands = computed(() => `${authLoginCommand.value}\nniyan dataset clone ${datasetPath.value} ${props.dataset.slug}-upload\ncp -R /path/to/your/files/. ${props.dataset.slug}-upload/\ncd ${props.dataset.slug}-upload\nniyan add --all --verbose\nniyan commit -m "Initial dataset"\nniyan push`)
 const { data: initialData, error: loadError } = await useAsyncData(`dataset-view:${props.dataset.id}:${route.fullPath}`, async () => {
   const [branchPage, tagPage] = await Promise.all([
     api.get<RefList>(`/api/v1/datasets/${props.dataset.id}/repository/refs?kind=branches`),

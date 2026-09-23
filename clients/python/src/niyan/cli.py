@@ -134,6 +134,7 @@ def build_parser():
     add_parser = commands.add_parser('add', help='Stage dataset paths using the repository’s Git attributes.')
     add_parser.add_argument('paths', nargs='*', help='One or more Git pathspecs to stage.')
     add_parser.add_argument('--all', action='store_true', help='Stage every working-tree change.')
+    add_parser.add_argument('--verbose', action='store_true', help='Print each path as Git stages it.')
     add_mode = add_parser.add_mutually_exclusive_group()
     add_mode.add_argument('--lfs', action='store_true', help='Persist Git LFS tracking for selected regular files before staging.')
     add_mode.add_argument('--git', action='store_true', help='Persist ordinary Git tracking for selected regular files before staging.')
@@ -389,7 +390,7 @@ def main(argv=None):
                 parser.error('--all cannot be combined with explicit paths.')
             if not arguments.all and not arguments.paths:
                 parser.error('add requires at least one path or --all.')
-            stage_paths(arguments.paths, all_paths=arguments.all, force_lfs=arguments.lfs, force_git=arguments.git, cwd=Path.cwd())
+            stage_paths(arguments.paths, all_paths=arguments.all, force_lfs=arguments.lfs, force_git=arguments.git, verbose=arguments.verbose, cwd=Path.cwd())
             return 0
         if arguments.command == 'restore':
             restore_paths(arguments.paths, staged=arguments.staged, cwd=Path.cwd())

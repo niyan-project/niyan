@@ -22,7 +22,7 @@ niyan commit -m "Add sequencing run 42"
 niyan push
 ```
 
-`niyan add` follows the repository's standard `.gitattributes` rules and delegates staging to Git. Configure Git LFS for the formats or directories used by your dataset before adding a large tree—for example, `git lfs track "*.jpg"` or `niyan add --lfs images/`. Use `--lfs` or `--git` when you need Niyān to persist an explicit rule for selected paths. Those choices are recorded in `.gitattributes`, so ordinary Git and Git LFS understand the repository too.
+`niyan add` follows the repository's standard `.gitattributes` rules and delegates staging to Git. Configure Git LFS for the formats or directories used by your dataset before adding a large tree—for example, `git lfs track "*.jpg"` or `niyan add --lfs images/`. Use `--lfs` or `--git` when you need Niyān to persist an explicit rule for selected paths. Add `--verbose` to print each path as Git stages it. Those choices are recorded in `.gitattributes`, so ordinary Git and Git LFS understand the repository too.
 
 Common commands mirror familiar Git operations:
 

@@ -1219,14 +1219,15 @@ class CliGitTests(unittest.TestCase):
 
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(commands[0][-6:], ['-C', str(self.root), 'lfs', 'push', 'origin', 'main'])
-        self.assertEqual(commands[1][-6:], ['-C', str(self.root), 'push', '--follow-tags', 'origin', 'main:refs/heads/main'])
+        self.assertEqual(commands[1][-7:], ['-C', str(self.root), 'push', '--follow-tags', '--progress', 'origin', 'main:refs/heads/main'])
         self.assertNotIn('--set-upstream', commands[1])
         self.assertNotIn('niyan_selector_secret', repr(run.call_args_list))
         self.assertNotIn('niyan_environment_secret', repr(run.call_args_list))
         self.assertNotIn('NIYAN_TOKEN', run.call_args_list[0].kwargs['env'])
+        self.assertEqual(run.call_args_list[0].kwargs['env']['GIT_LFS_FORCE_PROGRESS'], '1')
         self.assertNotIn('GIT_LFS_SKIP_PUSH', run.call_args_list[0].kwargs['env'])
         self.assertEqual(run.call_args_list[1].kwargs['env']['GIT_LFS_SKIP_PUSH'], '1')
-        configure.assert_called_once_with(self.root, environment={'PATH': '/usr/bin', 'GIT_LFS_SKIP_SMUDGE': '1'}, install_filters=True)
+        configure.assert_called_once_with(self.root, environment={'PATH': '/usr/bin', 'GIT_LFS_SKIP_SMUDGE': '1', 'GIT_LFS_FORCE_PROGRESS': '1'}, install_filters=True)
         self.assertEqual(output.getvalue(), 'Push complete.\n')
 
     def test_first_push_creates_same_named_upstream(self):
@@ -1242,18 +1243,10 @@ class CliGitTests(unittest.TestCase):
             push_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
 
         push_command = run.call_args_list[1].args[0]
-        self.assertEqual(push_command[-7:], ['-C', str(self.root), 'push', '--follow-tags', '--set-upstream', 'origin', 'experiment:refs/heads/experiment'])
+        self.assertEqual(push_command[-8:], ['-C', str(self.root), 'push', '--follow-tags', '--progress', '--set-upstream', 'origin', 'experiment:refs/heads/experiment'])
 
-    def test_interactive_push_forces_visible_lfs_and_git_progress(self):
-        """Keep long-running transfers observable without an extra flag."""
-
-        class InteractiveOutput(io.StringIO):
-            """Represent an attached terminal while retaining test output."""
-
-            def isatty(self):
-                """Report an interactive terminal."""
-
-                return True
+    def test_push_forces_visible_lfs_and_git_progress_by_default(self):
+        """Keep long-running transfers observable even when stderr is not detected as a TTY."""
 
         identity = CheckoutIdentity(
             host='https://niyan.example',
@@ -1262,11 +1255,27 @@ class CliGitTests(unittest.TestCase):
         )
         completed = subprocess.CompletedProcess(args=[], returncode=0)
         with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git._require_checkout', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._git_output', return_value='0123456789abcdef'), patch('niyan.git._optional_current_upstream', return_value='origin/main'), patch('niyan.git.configure_lfs_transfer'), patch('niyan.git.subprocess.run', return_value=completed) as run:
-            push_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=InteractiveOutput())
+            push_dataset(paths=self.paths, stores=self.stores, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
 
         self.assertEqual(run.call_args_list[0].kwargs['env']['GIT_LFS_FORCE_PROGRESS'], '1')
         self.assertFalse(run.call_args_list[0].kwargs['capture_output'])
         self.assertIn('--progress', run.call_args_list[1].args[0])
+
+    def test_quiet_push_suppresses_lfs_and_git_progress(self):
+        """Retain an explicit opt-out for scripts that do not want transfer output."""
+
+        identity = CheckoutIdentity(
+            host='https://niyan.example',
+            dataset_id='22222222-2222-2222-2222-222222222222',
+            dataset_path='researcher/images',
+        )
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+        with patch('niyan.auth.find_local_config', return_value=None), patch('niyan.git._require_checkout', return_value=identity), patch('niyan.git.shutil.which', return_value='/usr/bin/tool'), patch('niyan.git._current_branch', return_value='main'), patch('niyan.git._git_output', return_value='0123456789abcdef'), patch('niyan.git._optional_current_upstream', return_value='origin/main'), patch('niyan.git.configure_lfs_transfer'), patch('niyan.git.subprocess.run', return_value=completed) as run:
+            push_dataset(paths=self.paths, stores=self.stores, quiet=True, cwd=self.root, environment={'PATH': '/usr/bin'}, stderr=io.StringIO())
+
+        self.assertNotIn('GIT_LFS_FORCE_PROGRESS', run.call_args_list[0].kwargs['env'])
+        self.assertTrue(run.call_args_list[0].kwargs['capture_output'])
+        self.assertNotIn('--progress', run.call_args_list[1].args[0])
 
     def test_failed_lfs_publication_never_attempts_a_ref_update(self):
         """Keep the remote branch unchanged when any required LFS object is unavailable."""
