@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-22
+
+### Added
+
+- Optional per-path staging output through `niyan add --verbose`, used by both empty-dataset onboarding guides.
+
+### Fixed
+
+- Forced Git and Git LFS progress output during `niyan push` by default, including when the terminal is not detected as interactive.
+
 ## [0.4.0] - 2026-09-22
 
 ### Added
@@ -63,7 +73,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Direct, authorized S3-compatible transfers including resilient multipart uploads.
 - Docker Compose deployment, operational health checks, and cross-component continuous integration.
 
-[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/niyan-project/niyan/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/niyan-project/niyan/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/niyan-project/niyan/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/niyan-project/niyan/compare/v0.1.0...v0.2.0
