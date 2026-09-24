@@ -11,7 +11,7 @@ The CLI is the recommended interface for substantial dataset work. It wraps ordi
 
 - Browser-assisted login and secure credential storage.
 - Shallow, single-branch clones by default.
-- Git LFS tracking for binary files and files larger than 10 MiB.
+- A one-time file-format selector that initializes standard Git LFS rules when a repository has no `.gitattributes` policy yet.
 - Commits, branches, tags, merges, pulls, and pushes.
 - Selective or metadata-only materialization of large datasets.
 - Remote tree browsing, streaming to standard output, and direct downloads.

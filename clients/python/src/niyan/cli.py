@@ -131,7 +131,7 @@ def build_parser():
         command_parser.add_argument('--json', action='store_true', help='Write stable JSON to standard output.')
 
     commands.add_parser('status', help='Show dataset working-copy and LFS state.')
-    add_parser = commands.add_parser('add', help='Stage dataset paths using the repository’s Git attributes.')
+    add_parser = commands.add_parser('add', help='Stage dataset paths and initialize the repository’s Git LFS policy when needed.')
     add_parser.add_argument('paths', nargs='*', help='One or more Git pathspecs to stage.')
     add_parser.add_argument('--all', action='store_true', help='Stage every working-tree change.')
     add_parser.add_argument('--verbose', action='store_true', help='Print each path as Git stages it.')

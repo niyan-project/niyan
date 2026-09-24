@@ -43,7 +43,7 @@ class WorkingCopyTests(unittest.TestCase):
             'if len(sys.argv) > 1 and sys.argv[1] == "install":\n'
             '    pass\n'
             'elif len(sys.argv) > 1 and sys.argv[1] == "track":\n'
-            '    filename = sys.argv[sys.argv.index("--filename") + 1]\n'
+            '    filename = sys.argv[sys.argv.index("--filename") + 1] if "--filename" in sys.argv else sys.argv[-1]\n'
             '    attributes = pathlib.Path(".gitattributes")\n'
             '    existing = attributes.read_text() if attributes.exists() else ""\n'
             '    line = f"{filename} filter=lfs diff=lfs merge=lfs -text\\n"\n'
@@ -383,6 +383,81 @@ class WorkingCopyTests(unittest.TestCase):
         self.assertEqual(self._git('show', ':large.txt').stdout, b'a' * (LFS_SIZE_THRESHOLD + 1))
         self.assertEqual((self.repository / '.gitattributes').read_text(), '*.bin filter=lfs diff=lfs merge=lfs -text\n')
 
+    def test_first_interactive_add_initializes_lfs_policy_from_git_visible_extensions(self):
+        """Prompt once from Git's ignored-file view and preserve compound formats."""
+
+        repository = self.root / 'new-dataset'
+        self._initialize_checkout(repository)
+        (repository / '.gitignore').write_text('ignored/\n')
+        (repository / 'ignored').mkdir()
+        (repository / 'ignored' / 'hidden.jpg').write_bytes(b'ignored')
+        (repository / 'scan.jpg').write_bytes(b'jpeg')
+        (repository / 'upper.JPG').write_bytes(b'jpeg')
+        (repository / 'volume.nii.gz').write_bytes(b'nifti')
+        (repository / 'table.csv.gz').write_bytes(b'csv')
+        (repository / 'README.md').write_text('# Dataset\n')
+        self._git('config', 'filter.lfs.clean', f'{self.fake_lfs} clean', cwd=repository)
+        self._git('config', 'filter.lfs.smudge', 'cat', cwd=repository)
+        self._git('config', 'filter.lfs.required', 'true', cwd=repository)
+
+        with self._lfs_environment(), patch('niyan.working_copy.is_interactive', return_value=True), patch('niyan.working_copy.select_lfs_extensions', return_value=['.jpg', '.nii.gz']) as selector:
+            stage_paths([], all_paths=True, cwd=repository)
+
+        selector.assert_called_once_with({'.csv.gz': 1, '.jpg': 2, '.md': 1, '.nii.gz': 1}, stderr=None)
+        attributes = (repository / '.gitattributes').read_text()
+        self.assertIn('*.jpg filter=lfs', attributes)
+        self.assertIn('*.JPG filter=lfs', attributes)
+        self.assertIn('*.nii.gz filter=lfs', attributes)
+        self.assertNotIn('*.csv.gz filter=lfs', attributes)
+        self.assertNotIn('hidden.jpg', attributes)
+        self.assertTrue(self._git('show', ':scan.jpg', cwd=repository).stdout.startswith(LFS_POINTER_VERSION))
+        self.assertTrue(self._git('show', ':upper.JPG', cwd=repository).stdout.startswith(LFS_POINTER_VERSION))
+        self.assertTrue(self._git('show', ':volume.nii.gz', cwd=repository).stdout.startswith(LFS_POINTER_VERSION))
+        self.assertEqual(self._git('show', ':table.csv.gz', cwd=repository).stdout, b'csv')
+
+    def test_add_never_discovers_extensions_when_attributes_already_exist(self):
+        """Treat any root attribute file as a complete repository policy."""
+
+        (self.repository / 'new.jpg').write_bytes(b'jpeg')
+        with patch('niyan.working_copy.is_interactive', return_value=True), patch('niyan.working_copy._discover_extensions', side_effect=AssertionError('existing policy must bypass discovery')):
+            stage_paths(['new.jpg'], cwd=self.repository)
+
+        self.assertEqual(self._git('show', ':new.jpg').stdout, b'jpeg')
+
+    def test_noninteractive_first_add_stages_without_creating_attributes(self):
+        """Keep scripts deterministic when no terminal can answer the selector."""
+
+        repository = self.root / 'automated-dataset'
+        self._initialize_checkout(repository)
+        (repository / 'sample.jpg').write_bytes(b'jpeg')
+
+        stage_paths([], all_paths=True, cwd=repository, stdin=io.StringIO(), stderr=io.StringIO())
+
+        self.assertFalse((repository / '.gitattributes').exists())
+        self.assertEqual(self._git('show', ':sample.jpg', cwd=repository).stdout, b'jpeg')
+
+    def test_cancelled_first_add_leaves_repository_untouched(self):
+        """Do not stage files or leave a partial policy after prompt cancellation."""
+
+        repository = self.root / 'cancelled-dataset'
+        self._initialize_checkout(repository)
+        (repository / 'sample.jpg').write_bytes(b'jpeg')
+        with patch('niyan.working_copy.is_interactive', return_value=True), patch('niyan.working_copy.select_lfs_extensions', side_effect=KeyboardInterrupt):
+            with self.assertRaisesRegex(GitError, 'selection cancelled'):
+                stage_paths([], all_paths=True, cwd=repository)
+
+        self.assertFalse((repository / '.gitattributes').exists())
+        self.assertEqual(self._git('diff', '--cached', '--name-only', cwd=repository).stdout, b'')
+
+    def test_extension_discovery_preserves_compression_and_rejects_terminal_controls(self):
+        """Recognize useful compound suffixes without rendering hostile filenames."""
+
+        self.assertEqual(working_copy._file_extension('subject.v2.nii.gz'), '.nii.gz')
+        self.assertEqual(working_copy._file_extension('records.csv.zst'), '.csv.zst')
+        self.assertEqual(working_copy._file_extension('image.JPEG'), '.JPEG')
+        self.assertIsNone(working_copy._file_extension('README'))
+        self.assertIsNone(working_copy._file_extension('malicious.\x1b[31m'))
+
     def test_add_verbose_streams_git_staging_output(self):
         """Delegate requested per-path output directly to Git."""
 
@@ -590,10 +665,10 @@ class WorkingCopyTests(unittest.TestCase):
         configuration.set_checkout(CheckoutIdentity(host=DATASET_HOST, dataset_id=DATASET_ID, dataset_path=DATASET_PATH, history='shallow'))
         configuration.save(find_local_config(path, required=True))
 
-    def _git(self, *arguments):
-        """Run one required Git command in the primary checkout."""
+    def _git(self, *arguments, cwd=None):
+        """Run one required Git command in a test checkout."""
 
-        return subprocess.run(['git', '-C', str(self.repository), *arguments], check=True, capture_output=True)
+        return subprocess.run(['git', '-C', str(cwd or self.repository), *arguments], check=True, capture_output=True)
 
 
 if __name__ == '__main__':

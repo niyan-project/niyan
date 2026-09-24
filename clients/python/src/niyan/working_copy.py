@@ -10,12 +10,15 @@ from pathlib import Path
 
 from niyan.errors import GitConflictError, GitError
 from niyan.git import configure_lfs_transfer, load_checkout_identity
+from niyan.terminal import is_interactive, select_lfs_extensions, status as terminal_status, success as terminal_success
 
 
 LFS_POINTER_VERSION = b'version https://git-lfs.github.com/spec/v1'
 LFS_OBJECT_ID_PATTERN = re.compile(br'^oid sha256:([0-9a-f]{64})$')
 LFS_SIZE_THRESHOLD = 10 * 1024 * 1024
 BINARY_SAMPLE_SIZE = 8000
+COMPRESSION_SUFFIXES = {'.br', '.bz2', '.gz', '.lz4', '.xz', '.zst'}
+SAFE_EXTENSION_PATTERN = re.compile(r'^\.[A-Za-z0-9][A-Za-z0-9._+-]{0,31}$')
 
 
 def show_status(*, cwd=None, stdout=None):
@@ -65,7 +68,7 @@ def show_status(*, cwd=None, stdout=None):
     return status
 
 
-def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, verbose=False, cwd=None, stderr=None):
+def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, verbose=False, cwd=None, stdin=None, stderr=None):
     """Stage dataset changes through Git and optional explicit LFS overrides.
 
     Parameters
@@ -82,6 +85,8 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, ver
         Print each path as Git stages it.
     cwd : pathlib.Path, optional
         Directory inside the Niyān checkout.
+    stdin : file-like object, optional
+        Input stream used to decide whether the one-time selector is safe.
     stderr : file-like object, optional
         Warning destination.
     """
@@ -96,17 +101,25 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, ver
     working_directory = Path(cwd or Path.cwd())
     _require_checkout(working_directory)
     configure_lfs_transfer(working_directory)
+    root = Path(os.fsdecode(_run_git(working_directory, ['rev-parse', '--show-toplevel'], operation='locate the working tree').stdout).strip())
     git_pathspecs = _git_pathspecs(working_directory, paths)
     if not force_lfs and not force_git:
+        attributes_created = _initialize_lfs_policy(root, working_directory, stdin=stdin, stderr=stderr)
         # Ordinary staging deliberately delegates file selection and clean-filter behavior to Git. In particular, never open every selected file merely to guess whether it belongs in LFS; repository .gitattributes is the standard, scalable source of truth.
         stage_arguments = ['add']
         if verbose:
             stage_arguments.append('--verbose')
-        stage_arguments.extend(['--all'] if all_paths else ['-A', '--', *git_pathspecs])
-        _run_git(working_directory, stage_arguments, operation='stage the requested dataset paths', capture_output=not verbose, timeout=None)
+        if all_paths:
+            stage_arguments.append('--all')
+        else:
+            stage_arguments.extend(['-A', '--', *git_pathspecs])
+            if attributes_created:
+                stage_arguments.append(':(literal).gitattributes')
+        with terminal_status('Staging dataset changes…', stderr=stderr, enabled=not verbose):
+            _run_git(working_directory, stage_arguments, operation='stage the requested dataset paths', capture_output=not verbose, timeout=None)
+        terminal_success('Dataset changes staged.', stderr=stderr)
         return
 
-    root = Path(os.fsdecode(_run_git(working_directory, ['rev-parse', '--show-toplevel'], operation='locate the working tree').stdout).strip())
     status_arguments = ['-c', 'status.relativePaths=false', 'status', '--porcelain=v2', '-z', '--untracked-files=all']
     if not all_paths:
         status_arguments.extend(['--', *git_pathspecs])
@@ -193,7 +206,72 @@ def stage_paths(paths, *, all_paths=False, force_lfs=False, force_git=False, ver
         stage_arguments.append('-A')
         selected = [str(path) for path in sorted(changed_attributes)]
         stage_arguments.extend(['--', *git_pathspecs, *selected])
-    _run_git(working_directory, stage_arguments, operation='stage the requested dataset paths', capture_output=not verbose, timeout=None)
+    with terminal_status('Staging dataset changes…', stderr=stderr, enabled=not verbose):
+        _run_git(working_directory, stage_arguments, operation='stage the requested dataset paths', capture_output=not verbose, timeout=None)
+    terminal_success('Dataset changes staged.', stderr=stderr)
+
+
+def _initialize_lfs_policy(root, working_directory, *, stdin=None, stderr=None):
+    """Create the repository's initial Git LFS policy through one interactive prompt."""
+
+    attributes_path = root / '.gitattributes'
+    if attributes_path.exists() or attributes_path.is_symlink() or not is_interactive(stdin=stdin, stderr=stderr):
+        return False
+
+    with terminal_status('Discovering file formats…', stderr=stderr):
+        extensions = _discover_extensions(root, working_directory)
+    extension_counts = {extension: details['count'] for extension, details in extensions.items()}
+    try:
+        selected = select_lfs_extensions(extension_counts, stderr=stderr) if extension_counts else []
+    except KeyboardInterrupt as error:
+        raise GitError('Git LFS format selection cancelled; no files were staged.') from error
+
+    attributes_path.write_text('# Git LFS tracking policy initialized by Niyān.\n')
+    selected_patterns = sorted({pattern for extension in selected for pattern in extensions[extension]['patterns']})
+    if selected_patterns:
+        _require_git_lfs()
+        configure_lfs_transfer(working_directory, install_filters=True)
+        for pattern in selected_patterns:
+            _run_git(root, ['lfs', 'track', '--', f'*{pattern}'], operation=f'configure Git LFS for {pattern!r}')
+    return True
+
+
+def _discover_extensions(root, working_directory):
+    """Use Git's ignore rules to count repository file formats without opening files."""
+
+    result = _run_git(working_directory, ['ls-files', '--cached', '--others', '--exclude-standard', '--deduplicate', '-z'], operation='discover repository file formats', timeout=None)
+    extensions = {}
+    for encoded_path in result.stdout.split(b'\0'):
+        if not encoded_path:
+            continue
+        path = os.fsdecode(encoded_path)
+        relative = Path(path)
+        if relative.is_absolute() or '..' in relative.parts or relative.name == '.gitattributes':
+            continue
+        try:
+            metadata = (root / relative).lstat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            continue
+        observed = _file_extension(relative.name)
+        if observed is None:
+            continue
+        normalized = observed.casefold()
+        details = extensions.setdefault(normalized, {'count': 0, 'patterns': set()})
+        details['count'] += 1
+        details['patterns'].add(observed)
+    return extensions
+
+
+def _file_extension(filename):
+    """Return a normalized format suffix, preserving compressed compound formats."""
+
+    suffixes = Path(filename).suffixes
+    if not suffixes:
+        return None
+    extension = f'{suffixes[-2]}{suffixes[-1]}' if len(suffixes) > 1 and suffixes[-1].casefold() in COMPRESSION_SUFFIXES else suffixes[-1]
+    return extension if SAFE_EXTENSION_PATTERN.fullmatch(extension) else None
 
 
 def _git_pathspecs(working_directory, paths):
