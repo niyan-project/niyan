@@ -27,16 +27,16 @@ The published container contains the Niyān application. The self-contained inst
 Run the bootstrap script from the exact release tag you intend to deploy:
 
 ```shell
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/niyan-project/niyan/v0.4.0/deploy/install.sh | sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/niyan-project/niyan/v0.6.0/deploy/install.sh | sh
 cd niyan-deploy
 ```
 
-The script downloads only `compose.yml`, `Caddyfile`, `.env.example`, and the deployment runbook from the same `v0.4.0` tag, then creates a private `.env` for editing. It refuses to overwrite a non-empty destination and does not invoke `sudo`, start Docker, or modify the host outside `niyan-deploy`.
+The script downloads only `compose.yml`, `Caddyfile`, `.env.example`, and the deployment runbook from the same `v0.6.0` tag, then creates a private `.env` for editing. It refuses to overwrite a non-empty destination and does not invoke `sudo`, start Docker, or modify the host outside `niyan-deploy`.
 
 To choose a different empty destination, pass it after `sh -s --`:
 
 ```shell
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/niyan-project/niyan/v0.4.0/deploy/install.sh | sh -s -- /srv/niyan
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/niyan-project/niyan/v0.6.0/deploy/install.sh | sh -s -- /srv/niyan
 cd /srv/niyan
 ```
 

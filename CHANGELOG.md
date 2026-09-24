@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-24
+
+### Added
+
+- Git and Git LFS storage indicators, latest-affecting commit links, bounded UTF-8 text previews, and linkable commit-detail views in dataset repositories.
+- An NDPI filesystem-explorer notebook demonstrating authenticated remote dataset access without a local checkout.
+
+### Fixed
+
+- Prevented long dataset descriptions and commit bodies from displacing adjacent metadata in listing views.
+- Kept deployment defaults, bootstrap examples, and operator instructions aligned with the current release.
+
 ## [0.5.0] - 2026-09-24
 
 ### Added
@@ -91,7 +103,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Direct, authorized S3-compatible transfers including resilient multipart uploads.
 - Docker Compose deployment, operational health checks, and cross-component continuous integration.
 
-[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/niyan-project/niyan/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/niyan-project/niyan/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/niyan-project/niyan/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/niyan-project/niyan/compare/v0.3.0...v0.4.0
