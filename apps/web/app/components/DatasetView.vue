@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
-import type { BlobMetadata, BrowserDraft, BrowserDraftList, CommitItem, CommitList, Dataset, DatasetGrant, DirectUploadAction, DownloadAction, GrantList, LfsStage, NamespaceList, Readme, RefList, Role, TreeEntry, TreeList, UserSearchItem } from '~/types/api'
+import type { BlobMetadata, BrowserDraft, BrowserDraftList, CommitItem, CommitList, Dataset, DatasetGrant, DirectUploadAction, DownloadAction, GrantList, LfsStage, NamespaceList, Readme, RefList, Role, TextPreview, TreeEntry, TreeList, UserSearchItem } from '~/types/api'
 import { NiyanApiError } from '~/composables/useApi'
 
 const props = defineProps<{ dataset: Dataset }>()
@@ -14,7 +14,9 @@ const { formatBytes, formatRelative } = useFormatting()
 const tab = computed(() => typeof route.query.tab === 'string' ? route.query.tab : 'files')
 const revision = computed(() => typeof route.query.revision === 'string' ? route.query.revision : props.dataset.default_branch)
 const treePath = computed(() => typeof route.query.path === 'string' ? route.query.path : '')
+const commitId = computed(() => typeof route.query.commit === 'string' ? route.query.commit : '')
 const selectedBlob = ref<BlobMetadata | null>(null)
+const selectedText = ref<TextPreview | null>(null)
 const saving = ref(false)
 const editForm = reactive({ name: props.dataset.name, slug: props.dataset.slug, description: props.dataset.description })
 const emptyGuide = ref<'new' | 'existing'>('new')
@@ -49,6 +51,7 @@ const { data: initialData, error: loadError } = await useAsyncData(`dataset-view
   let tree: TreeList | null = null
   let readme: Readme | null = null
   let commits: CommitItem[] = []
+  let selectedCommit: CommitItem | null = null
   let grants: DatasetGrant[] = []
   let groupCandidates: { label: string, value: string }[] = []
   let browserDraft: BrowserDraft | null = null
@@ -79,6 +82,7 @@ const { data: initialData, error: loadError } = await useAsyncData(`dataset-view
     try {
       const response = await api.get<CommitList>(`/api/v1/datasets/${props.dataset.id}/repository/commits?revision=${encodeURIComponent(revision.value)}&limit=100`)
       commits = response.items
+      if (commitId.value) selectedCommit = await api.get<CommitItem>(`/api/v1/datasets/${props.dataset.id}/repository/commits/${encodeURIComponent(commitId.value)}`)
     } catch (error) {
       if (!(error instanceof NiyanApiError) || error.code !== 'revision_not_found') throw error
     }
@@ -93,7 +97,7 @@ const { data: initialData, error: loadError } = await useAsyncData(`dataset-view
     groupCandidates = namespacePage.items.filter(item => item.kind === 'group' && item.id !== props.dataset.namespace_id).map(item => ({ label: item.path, value: item.path }))
   }
 
-  return { branches, tags, emptyRepository, tree, readme, commits, grants, groupCandidates, browserDraft }
+  return { branches, tags, emptyRepository, tree, readme, commits, selectedCommit, grants, groupCandidates, browserDraft }
 }, {
   lazy: false,
   getCachedData: () => undefined
@@ -104,6 +108,7 @@ const emptyRepository = ref(initialData.value?.emptyRepository || false)
 const tree = ref<TreeList | null>(initialData.value?.tree || null)
 const readme = ref<Readme | null>(initialData.value?.readme || null)
 const commits = ref(initialData.value?.commits || [])
+const selectedCommit = ref<CommitItem | null>(initialData.value?.selectedCommit || null)
 const grants = ref(initialData.value?.grants || [])
 const groupCandidates = ref(initialData.value?.groupCandidates || [])
 const resolvedCommit = ref<string | null>(tree.value?.resolved_commit || null)
@@ -140,15 +145,29 @@ async function changeRevision(value: string) {
 
 async function openEntry(entry: TreeEntry) {
   if (entry.object_type === 'tree') {
+    selectedBlob.value = null
+    selectedText.value = null
     await router.replace({ query: { ...route.query, path: entry.path, revision: revision.value } })
     return
   }
   const query = new URLSearchParams({ revision: resolvedCommit.value || revision.value, path: entry.path })
   selectedBlob.value = await api.get<BlobMetadata>(`/api/v1/datasets/${props.dataset.id}/repository/blob?${query}`)
+  selectedText.value = null
+  try {
+    selectedText.value = await api.get<TextPreview>(`/api/v1/datasets/${props.dataset.id}/repository/text?${query}`)
+  } catch (error) {
+    if (!(error instanceof NiyanApiError) || error.code !== 'text_preview_unavailable') throw error
+  }
 }
 
 async function navigatePath(path: string) {
+  selectedBlob.value = null
+  selectedText.value = null
   await router.replace({ query: { ...route.query, path: path || undefined, revision: revision.value } })
+}
+
+function commitLocation(objectId: string) {
+  return { query: { tab: 'history', revision: revision.value, commit: objectId } }
 }
 
 async function download(path: string) {
@@ -381,14 +400,23 @@ async function publishDraft() {
         <div class="relative rounded-md bg-elevated p-4 pr-12"><pre class="overflow-x-auto text-sm"><code>{{ emptyGuide === 'new' ? newDatasetCommands : existingDatasetCommands }}</code></pre><UButton icon="i-lucide-copy" aria-label="Copy setup commands" color="neutral" variant="ghost" size="sm" class="absolute right-2 top-2" @click="copyText(emptyGuide === 'new' ? newDatasetCommands : existingDatasetCommands, 'Setup commands copied')" /></div>
       </UCard>
       <div v-else class="overflow-hidden rounded-lg border border-default bg-default">
-        <div v-for="entry in tree?.items" :key="entry.path" class="flex items-center border-b border-default last:border-b-0 hover:bg-elevated">
-          <button type="button" class="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 p-3 text-left sm:grid-cols-[minmax(0,1fr)_10rem_8rem]" @click="openEntry(entry)"><span class="flex min-w-0 items-center gap-2"><UIcon :name="entry.object_type === 'tree' ? 'i-lucide-folder' : 'i-lucide-file'" class="size-4 shrink-0 text-primary" /><span class="truncate text-highlighted">{{ entry.name }}</span></span><span class="hidden font-mono text-xs text-muted sm:block">{{ entry.object_id.slice(0, 10) }}</span><span class="text-right text-sm text-muted">{{ entry.object_type === 'tree' ? 'Directory' : formatBytes(entry.size) }}</span></button>
-          <UButton v-if="canWrite && entry.object_type === 'blob'" icon="i-lucide-trash-2" :aria-label="`Stage deletion of ${entry.name}`" color="error" variant="ghost" class="mr-2 shrink-0" @click="stageFileDeletion(entry.path)" />
+        <div v-for="entry in tree?.items" :key="entry.path" class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-default px-3 py-2 last:border-b-0 hover:bg-elevated sm:grid-cols-[minmax(0,1fr)_9rem_7rem_auto]">
+          <button type="button" class="flex min-w-0 cursor-pointer items-center gap-2 rounded-sm py-1 text-left hover:text-primary focus-visible:outline-2 focus-visible:outline-primary" @click="openEntry(entry)">
+            <UIcon :name="entry.object_type === 'tree' ? 'i-lucide-folder' : entry.is_lfs ? 'i-lucide-database' : 'i-lucide-git-branch'" class="size-4 shrink-0 text-primary" />
+            <span class="truncate text-highlighted">{{ entry.name }}</span>
+            <span v-if="entry.object_type === 'blob'" class="hidden shrink-0 items-center gap-1 text-xs text-muted md:flex"><span aria-hidden="true">·</span>{{ entry.is_lfs ? 'Git LFS' : 'Git' }}</span>
+          </button>
+          <NuxtLink v-if="entry.last_commit_id" :to="commitLocation(entry.last_commit_id)" class="hidden cursor-pointer truncate font-mono text-xs text-muted hover:text-primary hover:underline sm:block">{{ entry.last_commit_id.slice(0, 10) }}</NuxtLink>
+          <span v-else class="hidden text-xs text-muted sm:block">—</span>
+          <span class="text-right text-sm text-muted">{{ entry.object_type === 'tree' ? 'Directory' : formatBytes(entry.size) }}</span>
+          <UButton v-if="canWrite && entry.object_type === 'blob'" icon="i-lucide-trash-2" :aria-label="`Stage deletion of ${entry.name}`" color="error" variant="ghost" class="shrink-0" @click="stageFileDeletion(entry.path)" />
+          <span v-else class="hidden sm:block" />
         </div>
       </div>
 
       <UCard v-if="selectedBlob" class="mt-4">
         <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p class="font-medium text-highlighted">{{ selectedBlob.path }}</p><p class="mt-1 text-sm text-muted">{{ selectedBlob.is_lfs ? `Git LFS · ${formatBytes(selectedBlob.lfs_size)}` : `Git · ${formatBytes(selectedBlob.size)}` }} · {{ selectedBlob.object_id.slice(0, 12) }}</p></div><UButton label="Download" icon="i-lucide-download" @click="download(selectedBlob.path)" /></div>
+        <pre v-if="selectedText" class="mt-4 max-h-[36rem] overflow-auto rounded-md bg-elevated p-4 text-sm"><code>{{ selectedText.content }}</code></pre>
       </UCard>
 
       <UCard v-if="readme" class="mt-6">
@@ -399,8 +427,16 @@ async function publishDraft() {
 
     <section v-else-if="tab === 'history'" class="mt-6 space-y-3">
       <div class="mb-4"><USelect :model-value="revision" :items="[...branches, ...tags]" icon="i-lucide-git-branch" class="min-w-40" :disabled="emptyRepository" @update:model-value="value => changeRevision(String(value))" /></div>
-      <div v-for="commit in commits" :key="commit.object_id" class="rounded-lg border border-default p-4"><div class="flex flex-col gap-2 sm:flex-row sm:justify-between"><div class="min-w-0"><p class="font-medium text-highlighted">{{ commit.subject }}</p><p class="mt-1 text-sm text-muted"><NuxtLink v-if="commit.author_user" :to="`/users/${commit.author_user.username}`" class="hover:text-primary hover:underline">{{ commit.author_user.display_name }}</NuxtLink><span v-else>{{ commit.author_name }} <UBadge class="ml-1" color="neutral" variant="subtle" size="xs">Unlinked author</UBadge></span> · {{ formatRelative(commit.authored_at) }}</p><SafeMarkdown v-if="commit.body.trim()" class="mt-3 text-sm" :content="commit.body" :dataset-id="dataset.id" :dataset-path="datasetPath" :revision="revision" source-path="" /></div><code class="shrink-0 text-xs text-muted">{{ commit.object_id.slice(0, 10) }}</code></div></div>
-      <UAlert v-if="!commits.length" color="neutral" variant="soft" description="No commits are available on this revision." />
+      <UCard v-if="selectedCommit">
+        <template #header><div class="flex flex-wrap items-center justify-between gap-3"><div class="min-w-0"><p class="break-words font-medium text-highlighted">{{ selectedCommit.subject }}</p><code class="mt-1 block break-all text-xs text-muted">{{ selectedCommit.object_id }}</code></div><UButton :to="{ query: { tab: 'history', revision } }" label="Back to history" icon="i-lucide-arrow-left" color="neutral" variant="outline" /></div></template>
+        <p class="text-sm text-muted"><NuxtLink v-if="selectedCommit.author_user" :to="`/users/${selectedCommit.author_user.username}`" class="hover:text-primary hover:underline">{{ selectedCommit.author_user.display_name }}</NuxtLink><span v-else>{{ selectedCommit.author_name }} <UBadge class="ml-1" color="neutral" variant="subtle" size="xs">Unlinked author</UBadge></span> committed {{ formatRelative(selectedCommit.authored_at) }}</p>
+        <div v-if="selectedCommit.parent_ids.length" class="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted"><span>Parents</span><NuxtLink v-for="parent in selectedCommit.parent_ids" :key="parent" :to="commitLocation(parent)" class="cursor-pointer font-mono hover:text-primary hover:underline">{{ parent.slice(0, 10) }}</NuxtLink></div>
+        <SafeMarkdown v-if="selectedCommit.body.trim()" class="mt-5 text-sm" :content="selectedCommit.body" :dataset-id="dataset.id" :dataset-path="datasetPath" :revision="selectedCommit.object_id" source-path="" />
+      </UCard>
+      <template v-else>
+        <div v-for="commit in commits" :key="commit.object_id" class="rounded-lg border border-default p-4"><div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div class="min-w-0 flex-1 overflow-hidden"><NuxtLink :to="commitLocation(commit.object_id)" class="cursor-pointer break-words font-medium text-highlighted hover:text-primary hover:underline">{{ commit.subject }}</NuxtLink><p class="mt-1 text-sm text-muted"><NuxtLink v-if="commit.author_user" :to="`/users/${commit.author_user.username}`" class="hover:text-primary hover:underline">{{ commit.author_user.display_name }}</NuxtLink><span v-else>{{ commit.author_name }} <UBadge class="ml-1" color="neutral" variant="subtle" size="xs">Unlinked author</UBadge></span> · {{ formatRelative(commit.authored_at) }}</p><SafeMarkdown v-if="commit.body.trim()" class="mt-3 text-sm" :content="commit.body" :dataset-id="dataset.id" :dataset-path="datasetPath" :revision="commit.object_id" source-path="" /></div><NuxtLink :to="commitLocation(commit.object_id)" class="shrink-0 cursor-pointer font-mono text-xs text-muted hover:text-primary hover:underline">{{ commit.object_id.slice(0, 10) }}</NuxtLink></div></div>
+        <UAlert v-if="!commits.length" color="neutral" variant="soft" description="No commits are available on this revision." />
+      </template>
     </section>
 
     <section v-else-if="tab === 'branches'" class="mt-6">

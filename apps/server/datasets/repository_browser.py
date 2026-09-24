@@ -10,6 +10,8 @@ OBJECT_ID_PATTERN = re.compile(r'^[0-9a-f]{40,64}$')
 LFS_OBJECT_ID_PATTERN = re.compile(r'^oid sha256:([0-9a-f]{64})$')
 README_NAMES = ('README.md', 'README.rst', 'README.txt', 'README', 'readme.md', 'readme.rst', 'readme.txt', 'readme')
 README_MAX_BYTES = 1024 * 1024
+TEXT_PREVIEW_MAX_BYTES = 1024 * 1024
+PATH_HISTORY_MAX_BYTES = 32 * 1024 * 1024
 MAX_REVISION_LENGTH = 1024
 MAX_PATH_LENGTH = 4096
 
@@ -32,6 +34,10 @@ class InvalidRepositoryInput(RepositoryBrowseError):
 
 class LfsContentUnavailable(RepositoryBrowseError):
     """Report content that requires the not-yet-implemented LFS data plane."""
+
+
+class TextPreviewUnavailable(RepositoryBrowseError):
+    """Report content that cannot be rendered safely as bounded UTF-8 text."""
 
 
 @dataclass(frozen=True)
@@ -176,6 +182,25 @@ class RepositoryBrowser:
         has_more = len(records) > limit
         return resolved_commit, records[:limit], offset + limit if has_more else None
 
+    def get_commit(self, *, revision):
+        """Return one exact commit representation.
+
+        Parameters
+        ----------
+        revision : str
+            Branch, tag, or commit to resolve.
+
+        Returns
+        -------
+        tuple[str, dict]
+            Resolved commit identifier and its metadata.
+        """
+
+        resolved_commit, records, _ = self.list_commits(revision=revision, limit=1, offset=0)
+        if not records or records[0]['object_id'] != resolved_commit:
+            raise RepositoryBrowseError('Git returned inconsistent commit metadata.')
+        return resolved_commit, records[0]
+
     def list_tree(self, *, revision, path, limit, offset):
         """Return direct children of a directory at one exact commit.
 
@@ -211,6 +236,7 @@ class RepositoryBrowser:
             git_blob_size = int(size) if size != '-' else None
             parsed_entries.append((decoded_name, mode, object_type, object_id, git_blob_size))
         lfs_metadata = self._get_lfs_metadata_batch([(object_id, size) for _, _, object_type, object_id, size in parsed_entries if object_type == 'blob' and size is not None and size <= 1024])
+        latest_commits = self._latest_path_commit_ids(resolved_commit=resolved_commit, directory=normalized_path, child_names={name for name, *_ in parsed_entries})
         entries = []
         for decoded_name, mode, object_type, object_id, git_blob_size in parsed_entries:
             lfs_object_id, lfs_size = lfs_metadata.get(object_id, (None, None))
@@ -226,6 +252,7 @@ class RepositoryBrowser:
                     'is_lfs': lfs_object_id is not None,
                     'lfs_object_id': lfs_object_id,
                     'lfs_size': lfs_size,
+                    'last_commit_id': latest_commits.get(decoded_name),
                 }
             )
         has_more = len(entries) > limit
@@ -259,6 +286,119 @@ class RepositoryBrowser:
         size = int(self._run(['cat-file', '-s', object_id]).stdout.strip())
         lfs_object_id, lfs_size = self._get_lfs_metadata(object_id=object_id, size=size)
         return resolved_commit, BlobMetadata(path=normalized_path, object_id=object_id, size=size, lfs_object_id=lfs_object_id, lfs_size=lfs_size)
+
+    def read_text(self, *, revision, path):
+        """Return one bounded ordinary Git blob as UTF-8 text.
+
+        Parameters
+        ----------
+        revision : str
+            Branch, tag, or commit containing the file.
+        path : str
+            Repository-relative file path.
+
+        Returns
+        -------
+        tuple[str, BlobMetadata, str]
+            Resolved commit, immutable blob metadata, and decoded text.
+
+        Raises
+        ------
+        TextPreviewUnavailable
+            If the blob is stored through LFS, too large, binary, or not UTF-8.
+        """
+
+        resolved_commit, metadata = self.get_blob_metadata(revision=revision, path=path)
+        if metadata.lfs_object_id is not None or metadata.size > TEXT_PREVIEW_MAX_BYTES:
+            raise TextPreviewUnavailable('The file cannot be previewed as text.')
+        content = self._run(['cat-file', 'blob', metadata.object_id], maximum_output=TEXT_PREVIEW_MAX_BYTES).stdout
+        if b'\x00' in content:
+            raise TextPreviewUnavailable('The file cannot be previewed as text.')
+        try:
+            decoded = content.decode('utf-8')
+        except UnicodeDecodeError as error:
+            raise TextPreviewUnavailable('The file cannot be previewed as text.') from error
+        return resolved_commit, metadata, decoded
+
+    def _latest_path_commit_ids(self, *, resolved_commit, directory, child_names):
+        """Find the newest commit affecting each direct child with one Git walk.
+
+        Parameters
+        ----------
+        resolved_commit : str
+            Exact commit containing the listed tree.
+        directory : str
+            Normalized repository directory being listed.
+        child_names : set[str]
+            Direct child names that need attribution.
+
+        Returns
+        -------
+        dict[str, str]
+            Child names mapped to their newest affecting commit when found.
+        """
+
+        if not child_names:
+            return {}
+        arguments = ['log', '--format=%x1e%H', '--name-only', '-z', resolved_commit, '--']
+        if directory:
+            arguments.append(directory)
+        process = self._popen(arguments)
+        remaining = set(child_names)
+        commits = {}
+        buffer = b''
+        bytes_read = 0
+        intentionally_stopped = False
+
+        def consume(record):
+            fields = record.split(b'\x00')
+            if len(fields) < 2:
+                return
+            commit_id = fields[0].decode('ascii', errors='ignore')
+            if not OBJECT_ID_PATTERN.fullmatch(commit_id):
+                return
+            prefix = f'{directory}/' if directory else ''
+            for encoded_path in fields[1:]:
+                path = encoded_path.lstrip(b'\n').decode('utf-8', errors='replace')
+                if not path or (prefix and not path.startswith(prefix)):
+                    continue
+                relative_path = path[len(prefix) :]
+                child_name = relative_path.split('/', 1)[0]
+                if child_name in remaining:
+                    commits[child_name] = commit_id
+                    remaining.remove(child_name)
+
+        try:
+            while remaining:
+                chunk = process.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                bytes_read += len(chunk)
+                if bytes_read > PATH_HISTORY_MAX_BYTES:
+                    intentionally_stopped = True
+                    process.terminate()
+                    break
+                buffer += chunk
+                records = buffer.split(b'\x1e')
+                buffer = records.pop()
+                for record in records:
+                    if record:
+                        consume(record)
+                if not remaining:
+                    intentionally_stopped = True
+                    process.terminate()
+                    break
+            if not intentionally_stopped and buffer:
+                consume(buffer)
+            return_code = process.wait(timeout=5)
+        except (OSError, subprocess.SubprocessError) as error:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            raise RepositoryBrowseError('The repository could not be read.') from error
+        if return_code != 0 and not intentionally_stopped:
+            raise RepositoryBrowseError('The repository could not be read.')
+        return commits
 
     def _get_lfs_metadata(self, *, object_id, size):
         """Parse a small Git blob when it may be a standard LFS pointer.

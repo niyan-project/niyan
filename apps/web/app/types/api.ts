@@ -17,9 +17,10 @@ export interface RefList { kind: 'branches' | 'tags', limit: number, offset: num
 export interface CommitAuthorUser { id: number, username: string, display_name: string }
 export interface CommitItem { object_id: string, parent_ids: string[], author_name: string, author_email: string, authored_at: string, subject: string, body: string, author_user: CommitAuthorUser | null }
 export interface CommitList { resolved_commit: string, limit: number, offset: number, next_offset: number | null, items: CommitItem[] }
-export interface TreeEntry { name: string, path: string, mode: string, object_type: 'tree' | 'blob', object_id: string, size: number | null }
+export interface TreeEntry { name: string, path: string, mode: string, object_type: 'tree' | 'blob', object_id: string, size: number | null, git_blob_size: number | null, is_lfs: boolean, lfs_object_id: string | null, lfs_size: number | null, last_commit_id: string | null }
 export interface TreeList { resolved_commit: string, path: string, limit: number, offset: number, next_offset: number | null, items: TreeEntry[] }
 export interface BlobMetadata { resolved_commit: string, path: string, object_id: string, size: number, is_lfs: boolean, lfs_object_id: string | null, lfs_size: number | null }
+export interface TextPreview extends BlobMetadata { content_type: string, content: string }
 export interface Readme extends BlobMetadata { content: string }
 export interface DownloadAction { resolved_commit: string, path: string, size: number, storage: 'git' | 'lfs', method: 'GET', url: string, headers: Record<string, string>, expires_in: number | null }
 export interface Membership { id: number, namespace_id: string, user_id: number, username: string, display_name: string, role: Role, created_at: string, updated_at: string }

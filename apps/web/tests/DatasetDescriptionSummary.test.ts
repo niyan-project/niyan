@@ -10,6 +10,8 @@ describe('DatasetDescriptionSummary', () => {
 
     expect(wrapper.text()).toBe('Images Annotated training set with scan.')
     expect(wrapper.get('p').classes()).toContain('line-clamp-2')
+    expect(wrapper.get('p').classes()).toContain('break-words')
+    expect(wrapper.get('p').classes()).toContain('max-w-full')
     expect(wrapper.find('a').exists()).toBe(false)
     expect(wrapper.find('img').exists()).toBe(false)
   })

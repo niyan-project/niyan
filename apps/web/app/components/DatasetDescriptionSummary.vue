@@ -16,5 +16,5 @@ const plainText = computed(() => parser.parse(props.description, {}).map(tokenTe
 </script>
 
 <template>
-  <p v-if="plainText" class="mt-2 line-clamp-2 text-sm text-muted">{{ plainText }}</p>
+  <p v-if="plainText" class="mt-2 min-w-0 max-w-full break-words text-sm text-muted line-clamp-2">{{ plainText }}</p>
 </template>

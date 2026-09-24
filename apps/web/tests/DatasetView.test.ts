@@ -31,9 +31,10 @@ function installRepositoryResponses() {
   api.get.mockImplementation((url: string) => {
     if (url.includes('refs?kind=branches')) return Promise.resolve({ items: [{ name: 'main' }] })
     if (url.includes('refs?kind=tags')) return Promise.resolve({ items: [{ name: 'v1' }] })
-    if (url.includes('/repository/tree?')) return Promise.resolve({ resolved_commit: 'a'.repeat(40), path: '', items: [{ name: 'notes.txt', path: 'notes.txt', mode: '100644', object_type: 'blob', object_id: 'b'.repeat(40), size: 12 }] })
+    if (url.includes('/repository/tree?')) return Promise.resolve({ resolved_commit: 'a'.repeat(40), path: '', items: [{ name: 'notes.txt', path: 'notes.txt', mode: '100644', object_type: 'blob', object_id: 'b'.repeat(40), size: 12, git_blob_size: 12, is_lfs: false, lfs_object_id: null, lfs_size: null, last_commit_id: 'c'.repeat(40) }] })
     if (url.includes('/repository/readme?')) return Promise.reject(new Error('No README'))
     if (url.includes('/repository/blob?')) return Promise.resolve({ resolved_commit: 'a'.repeat(40), path: 'notes.txt', object_id: 'b'.repeat(40), size: 12, is_lfs: false, lfs_object_id: null, lfs_size: null })
+    if (url.includes('/repository/text?')) return Promise.resolve({ resolved_commit: 'a'.repeat(40), path: 'notes.txt', object_id: 'b'.repeat(40), size: 12, is_lfs: false, lfs_object_id: null, lfs_size: null, content_type: 'text/plain', content: 'hello dataset\n' })
     if (url.includes('/repository/download?')) return Promise.resolve({ storage: 'git', method: 'GET', url: '/api/v1/datasets/dataset-id/repository/blob/raw?revision=commit&path=notes.txt', headers: {}, size: 12, resolved_commit: 'a'.repeat(40), path: 'notes.txt', expires_in: null })
     throw new Error(`Unexpected GET ${url}`)
   })
@@ -56,11 +57,14 @@ describe('dataset repository view', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('notes.txt')
+    expect(wrapper.text()).toContain('Git')
+    expect(wrapper.findAll('a').some(link => link.text() === 'cccccccccc')).toBe(true)
     const entry = wrapper.findAll('button').find(button => button.text().includes('notes.txt'))
     expect(entry).toBeDefined()
     await entry!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Git · 12 B')
+    expect(wrapper.text()).toContain('hello dataset')
 
     await wrapper.findAll('button').find(button => button.text().includes('Download'))!.trigger('click')
     await flushPromises()
@@ -190,6 +194,29 @@ describe('dataset repository view', () => {
     expect(wrapper.text()).toContain('**Plain subject**')
     expect(wrapper.get('strong').text()).toBe('Detailed')
     expect(wrapper.get('a[href="/users/ada"]').text()).toBe('Ada Lovelace')
+    expect(wrapper.findAll('a').some(link => link.text() === 'aaaaaaaaaa')).toBe(true)
+    expect(wrapper.get('[data-niyan-readme]').classes()).toContain('overflow-hidden')
     expect(wrapper.text()).not.toContain('Unlinked author')
+  })
+
+  it('shows an exact commit page from a linkable history query', async () => {
+    currentRoute.query = { tab: 'history', revision: 'main', commit: 'a'.repeat(40) }
+    currentRoute.fullPath = `/lab/images?tab=history&revision=main&commit=${'a'.repeat(40)}`
+    api.get.mockImplementation((url: string) => {
+      if (url.includes('refs?kind=branches')) return Promise.resolve({ items: [{ name: 'main' }] })
+      if (url.includes('refs?kind=tags')) return Promise.resolve({ items: [] })
+      if (url.includes(`/repository/commits/${'a'.repeat(40)}`)) return Promise.resolve({ object_id: 'a'.repeat(40), parent_ids: ['b'.repeat(40)], author_name: 'Ada', author_email: 'ada@example.test', authored_at: '2030-01-01T00:00:00Z', subject: 'Add samples', body: 'Commit **details**.', author_user: null })
+      if (url.includes('/repository/commits?')) return Promise.resolve({ items: [] })
+      throw new Error(`Unexpected GET ${url}`)
+    })
+
+    const wrapper = await mountSuspended(DatasetView, { props: { dataset } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Add samples')
+    expect(wrapper.text()).toContain('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    expect(wrapper.text()).toContain('Parents')
+    expect(wrapper.get('strong').text()).toBe('details')
+    expect(wrapper.findAll('a').some(link => link.text() === 'bbbbbbbbbb')).toBe(true)
   })
 })

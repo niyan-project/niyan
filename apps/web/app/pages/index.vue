@@ -106,8 +106,8 @@ async function createDataset() {
     </div>
     <div v-else class="mt-6 overflow-hidden rounded-lg border border-default bg-default">
       <NuxtLink v-for="dataset in filteredDatasets" :key="dataset.id" :to="`/${dataset.namespace_path}/${dataset.slug}`" class="flex flex-col gap-2 border-b border-default p-4 last:border-b-0 hover:bg-elevated sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 class="font-medium text-highlighted">{{ dataset.name }}</h2><p class="mt-1 font-mono text-sm text-muted">{{ dataset.namespace_path }}/{{ dataset.slug }}</p><DatasetDescriptionSummary :description="dataset.description" /></div>
-        <div class="flex items-center gap-3 text-sm text-muted"><UBadge color="neutral" variant="subtle">{{ dataset.role || 'system' }}</UBadge><span>{{ formatRelative(dataset.created_at) }}</span></div>
+        <div class="min-w-0 flex-1"><h2 class="font-medium text-highlighted">{{ dataset.name }}</h2><p class="mt-1 truncate font-mono text-sm text-muted">{{ dataset.namespace_path }}/{{ dataset.slug }}</p><DatasetDescriptionSummary :description="dataset.description" /></div>
+        <div class="flex shrink-0 items-center gap-3 text-sm text-muted"><UBadge color="neutral" variant="subtle">{{ dataset.role || 'system' }}</UBadge><span>{{ formatRelative(dataset.created_at) }}</span></div>
       </NuxtLink>
       <div v-if="!filteredDatasets.length" class="p-8 text-center text-muted">No datasets match this view.</div>
     </div>

@@ -45,6 +45,7 @@ class RepositoryFixtureMixin:
         (working_path / 'nested' / 'sample.csv').write_text('value\n42\n')
         self.run_git('-C', str(working_path), 'add', '.')
         self.run_git('-C', str(working_path), 'commit', '-m', 'Initial dataset')
+        self.initial_commit = self.run_git('-C', str(working_path), 'rev-parse', 'HEAD').stdout.strip()
         self.run_git('-C', str(working_path), 'tag', 'v1')
 
         lfs_object_id = 'a' * 64
@@ -127,6 +128,9 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertTrue(large_entry['is_lfs'])
         self.assertEqual(large_entry['size'], 123456)
         self.assertEqual(large_entry['lfs_object_id'], self.lfs_object_id)
+        self.assertEqual(large_entry['last_commit_id'], self.main_commit)
+        self.assertEqual(next(item for item in tree['items'] if item['name'] == 'README.md')['last_commit_id'], self.initial_commit)
+        self.assertEqual(next(item for item in tree['items'] if item['name'] == 'nested')['last_commit_id'], self.initial_commit)
         self.assertEqual([item['path'] for item in nested_tree['items']], ['nested/sample.csv'])
         self.assertEqual(readme['resolved_commit'], self.main_commit)
         self.assertEqual(readme['path'], 'README.md')
@@ -137,6 +141,24 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertEqual(content['Content-Type'], 'text/markdown')
         self.assertIn('inline', content['Content-Disposition'])
         self.assertIn(b'Dataset documentation.', b''.join(content.streaming_content))
+
+    def test_exact_commit_and_text_preview_are_linkable(self):
+        """Expose immutable commit details and bounded plain text for the web UI."""
+
+        commit = self.client.get(self.repository_url(f'commits/{self.main_commit}'))
+        text = self.client.get(self.repository_url('text'), {'revision': self.main_commit, 'path': 'notes.txt'})
+        lfs = self.client.get(self.repository_url('text'), {'revision': self.main_commit, 'path': 'large.bin'})
+
+        self.assertEqual(commit.status_code, 200)
+        self.assertEqual(commit.json()['object_id'], self.main_commit)
+        self.assertEqual(commit.json()['subject'], 'Add large data pointer')
+        self.assertEqual(commit.json()['author_user']['username'], 'researcher')
+        self.assertEqual(text.status_code, 200)
+        self.assertEqual(text.json()['resolved_commit'], self.main_commit)
+        self.assertEqual(text.json()['content'], 'second version\n')
+        self.assertEqual(text.json()['content_type'], 'text/plain')
+        self.assertEqual(lfs.status_code, 409)
+        self.assertEqual(lfs.json()['code'], 'text_preview_unavailable')
 
     def test_resolve_dataset_path_and_revision_for_one_pinned_operation(self):
         """Resolve a full locator to dataset, repository path, and exact commit."""

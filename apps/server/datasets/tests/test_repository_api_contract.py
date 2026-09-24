@@ -6,8 +6,8 @@ from django.test import SimpleTestCase
 
 from datasets.lfs_transfers import LfsTransferUnavailable
 from datasets.object_storage import ObjectStoreError
-from datasets.repository_api import _parse_byte_range, authorize_repository_download_endpoint, display_repository_content_endpoint, download_repository_blob_endpoint, get_repository_blob_endpoint, get_repository_readme_endpoint, list_repository_commits_endpoint, list_repository_refs_endpoint, list_repository_tree_endpoint, resolve_repository_revision_endpoint, serialize_blob
-from datasets.repository_browser import InvalidRepositoryInput, LfsContentUnavailable, RepositoryBrowseError, RepositoryPathNotFound, RevisionNotFound
+from datasets.repository_api import _parse_byte_range, authorize_repository_download_endpoint, display_repository_content_endpoint, download_repository_blob_endpoint, get_repository_blob_endpoint, get_repository_commit_endpoint, get_repository_readme_endpoint, get_repository_text_endpoint, list_repository_commits_endpoint, list_repository_refs_endpoint, list_repository_tree_endpoint, resolve_repository_revision_endpoint, serialize_blob
+from datasets.repository_browser import InvalidRepositoryInput, LfsContentUnavailable, RepositoryBrowseError, RepositoryPathNotFound, RevisionNotFound, TextPreviewUnavailable
 
 
 class FakeRequest:
@@ -45,6 +45,11 @@ class FakeBrowser:
 
         return self.commit, [{'object_id': self.commit}], None
 
+    def get_commit(self, **options):
+        """Return one complete exact commit."""
+
+        return self.commit, {'object_id': self.commit, 'parent_ids': [], 'author_name': 'Researcher', 'author_email': '', 'authored_at': '2030-01-01T00:00:00Z', 'subject': 'Commit subject', 'body': ''}
+
     def resolve_revision(self, revision):
         """Resolve every accepted revision to one commit."""
 
@@ -59,6 +64,13 @@ class FakeBrowser:
         """Return selected file metadata."""
 
         return self.commit, self.metadata
+
+    def read_text(self, **options):
+        """Return one plain-text Git blob."""
+
+        if self.metadata.lfs_object_id is not None:
+            raise TextPreviewUnavailable()
+        return self.commit, self.metadata, 'content'
 
     def open_blob_range(self, **options):
         """Stream the requested byte interval."""
@@ -96,12 +108,17 @@ class RepositoryApiContractTests(SimpleTestCase):
             resolution = resolve_repository_revision_endpoint(request, self.dataset_id, revision='main')
             tree = list_repository_tree_endpoint(request, self.dataset_id, revision='main', path='/data/', limit=30, offset=3)
             blob = get_repository_blob_endpoint(request, self.dataset_id, path='data/file.bin', revision='main')
+            commit = get_repository_commit_endpoint(request, self.dataset_id, commit_id=FakeBrowser.commit)
+            text = get_repository_text_endpoint(request, self.dataset_id, path='data/file.bin', revision='main')
 
         self.assertEqual(refs, {'kind': 'tags', 'limit': 25, 'offset': 5, 'next_offset': None, 'items': [{'name': 'main'}]})
         self.assertEqual(commits['resolved_commit'], FakeBrowser.commit)
         self.assertEqual(resolution['dataset_id'], self.dataset_id)
         self.assertEqual(tree['path'], 'data')
         self.assertEqual(blob, serialize_blob(FakeBrowser.commit, browser.metadata))
+        self.assertEqual(commit['object_id'], FakeBrowser.commit)
+        self.assertIsNone(commit['author_user'])
+        self.assertEqual(text['content'], 'content')
 
     def test_readme_lfs_resource_redirects_to_direct_object_storage(self):
         """Keep relative README images out of Django's bulk-byte path."""
@@ -157,6 +174,18 @@ class RepositoryApiContractTests(SimpleTestCase):
             browser.list_refs = Mock(side_effect=error)
             with patch('datasets.repository_api.get_browser', return_value=browser):
                 self.assert_status(list_repository_refs_endpoint(request, self.dataset_id), status, code)
+
+    def test_commit_and_text_endpoints_map_specific_unavailable_content(self):
+        """Keep exact-commit and text-preview failures stable."""
+
+        request = FakeRequest()
+        browser = FakeBrowser()
+        browser.get_commit = Mock(side_effect=RevisionNotFound())
+        with patch('datasets.repository_api.get_browser', return_value=browser):
+            self.assert_status(get_repository_commit_endpoint(request, self.dataset_id, commit_id='missing'), 404, 'commit_not_found')
+
+        with patch('datasets.repository_api.get_browser', return_value=FakeBrowser(lfs=True)):
+            self.assert_status(get_repository_text_endpoint(request, self.dataset_id, path='data/file.bin'), 409, 'text_preview_unavailable')
 
     def test_raw_blob_download_supports_full_partial_and_unsatisfied_ranges(self):
         """Stream Git bytes with correct range and immutable identity headers."""

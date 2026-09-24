@@ -52,5 +52,5 @@ const rendered = computed(() => parser.render(props.content)
 <template>
   <!-- Raw HTML is disabled above; v-html renders only MarkdownIt's escaped output. -->
   <!-- eslint-disable-next-line vue/no-v-html -->
-  <div data-niyan-readme v-html="rendered" />
+  <div class="min-w-0 max-w-full overflow-hidden" data-niyan-readme v-html="rendered" />
 </template>

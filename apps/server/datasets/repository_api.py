@@ -13,7 +13,7 @@ from accounts.authentication import require_access, session_or_access_token
 from datasets.lfs_transfers import LfsTransferUnavailable, issue_download_action
 from datasets.models import LfsObject
 from datasets.object_storage import ObjectStoreError
-from datasets.repository_browser import InvalidRepositoryInput, LfsContentUnavailable, RepositoryBrowseError, RepositoryBrowser, RepositoryPathNotFound, RevisionNotFound
+from datasets.repository_browser import InvalidRepositoryInput, LfsContentUnavailable, RepositoryBrowseError, RepositoryBrowser, RepositoryPathNotFound, RevisionNotFound, TextPreviewUnavailable
 from datasets.selectors import get_visible_dataset
 
 
@@ -95,6 +95,7 @@ class TreeEntryResponse(Schema):
     is_lfs: bool
     lfs_object_id: str | None
     lfs_size: int | None
+    last_commit_id: str | None
 
 
 class TreeListResponse(Schema):
@@ -123,6 +124,13 @@ class BlobMetadataResponse(Schema):
 class ReadmeResponse(BlobMetadataResponse):
     """Return root README text together with exact blob metadata."""
 
+    content: str
+
+
+class TextPreviewResponse(BlobMetadataResponse):
+    """Return one bounded UTF-8 Git blob for browser viewing."""
+
+    content_type: str
     content: str
 
 
@@ -170,6 +178,15 @@ def serialize_blob(resolved_commit, metadata):
     }
 
 
+def link_commit_author(item):
+    """Attach a registered user when a commit email has an exact match."""
+
+    email = item.get('author_email', '').strip().lower()
+    user = get_user_model().objects.filter(email=email).first() if email else None
+    item['author_user'] = None if user is None else {'id': user.id, 'username': user.username, 'display_name': user.get_full_name().strip() or user.username}
+    return item
+
+
 @router.get('/{dataset_id}/repository/refs', response={200: RefListResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse, 503: ErrorResponse})
 def list_repository_refs_endpoint(request, dataset_id: UUID, kind: Literal['branches', 'tags'] = 'branches', limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0, le=MAX_LIST_OFFSET)):
     """List branches or tags directly from the bare repository."""
@@ -203,6 +220,24 @@ def list_repository_commits_endpoint(request, dataset_id: UUID, revision: str = 
         return {'resolved_commit': resolved_commit, 'limit': limit, 'offset': offset, 'next_offset': next_offset, 'items': items}
     except RevisionNotFound:
         return Status(404, {'code': 'revision_not_found', 'detail': 'The requested revision does not exist.'})
+    except InvalidRepositoryInput:
+        return Status(422, {'code': 'validation_error', 'detail': 'The repository request is invalid.'})
+    except RepositoryBrowseError:
+        return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be read.'})
+
+
+@router.get('/{dataset_id}/repository/commits/{commit_id}', response={200: CommitResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 422: ErrorResponse, 503: ErrorResponse})
+def get_repository_commit_endpoint(request, dataset_id: UUID, commit_id: str):
+    """Return one exact immutable commit."""
+
+    try:
+        browser = get_browser(request, dataset_id)
+        if browser is None:
+            return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+        _, item = browser.get_commit(revision=commit_id)
+        return link_commit_author(item)
+    except RevisionNotFound:
+        return Status(404, {'code': 'commit_not_found', 'detail': 'The requested commit does not exist.'})
     except InvalidRepositoryInput:
         return Status(422, {'code': 'validation_error', 'detail': 'The repository request is invalid.'})
     except RepositoryBrowseError:
@@ -256,6 +291,30 @@ def get_repository_blob_endpoint(request, dataset_id: UUID, path: str, revision:
             return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
         resolved_commit, metadata = browser.get_blob_metadata(revision=revision, path=path)
         return serialize_blob(resolved_commit, metadata)
+    except RevisionNotFound:
+        return Status(404, {'code': 'revision_not_found', 'detail': 'The requested revision does not exist.'})
+    except RepositoryPathNotFound:
+        return Status(404, {'code': 'path_not_found', 'detail': 'The requested repository path does not exist.'})
+    except InvalidRepositoryInput:
+        return Status(422, {'code': 'validation_error', 'detail': 'The repository request is invalid.'})
+    except RepositoryBrowseError:
+        return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be read.'})
+
+
+@router.get('/{dataset_id}/repository/text', response={200: TextPreviewResponse, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse, 503: ErrorResponse})
+def get_repository_text_endpoint(request, dataset_id: UUID, path: str, revision: str = 'main'):
+    """Return one small ordinary Git blob for safe plain-text rendering."""
+
+    try:
+        browser = get_browser(request, dataset_id)
+        if browser is None:
+            return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+        resolved_commit, metadata, content = browser.read_text(revision=revision, path=path)
+        response = serialize_blob(resolved_commit, metadata)
+        response.update({'content_type': guess_type(metadata.path)[0] or 'text/plain', 'content': content})
+        return response
+    except TextPreviewUnavailable:
+        return Status(409, {'code': 'text_preview_unavailable', 'detail': 'This file cannot be previewed as text.'})
     except RevisionNotFound:
         return Status(404, {'code': 'revision_not_found', 'detail': 'The requested revision does not exist.'})
     except RepositoryPathNotFound:
