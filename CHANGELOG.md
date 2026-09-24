@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-24
+
+### Added
+
+- Simple authenticated user profiles and commit-author links when Git author emails match registered accounts.
+- GitHub-flavored README and commit-body Markdown, including revision-pinned relative links and images.
+
+### Changed
+
+- Made nonblank account email addresses unique while continuing to allow accounts without an email address.
+- Limited dataset descriptions to plain-text, two-line summaries in listing views.
+- Restricted the main group listing to root groups while preserving authorized navigation through ancestor groups.
+- Moved destructive dataset confirmation into a progress-reporting modal.
+
+### Fixed
+
+- Removed internal framework terminology from system permission-group guidance.
+
 ## [0.4.1] - 2026-09-22
 
 ### Added
@@ -73,7 +91,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Direct, authorized S3-compatible transfers including resilient multipart uploads.
 - Docker Compose deployment, operational health checks, and cross-component continuous integration.
 
-[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/niyan-project/niyan/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/niyan-project/niyan/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/niyan-project/niyan/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/niyan-project/niyan/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/niyan-project/niyan/compare/v0.2.0...v0.3.0

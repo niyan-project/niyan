@@ -2,7 +2,7 @@
 
 set -eu
 
-release_tag="${NIYAN_INSTALL_RELEASE_TAG:-v0.4.1}"
+release_tag="${NIYAN_INSTALL_RELEASE_TAG:-v0.5.0}"
 destination="${1:-niyan-deploy}"
 repository="https://raw.githubusercontent.com/niyan-project/niyan"
 download_root="${repository}/${release_tag}/deploy"
