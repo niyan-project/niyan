@@ -172,7 +172,7 @@ async function deleteGroup() {
       <div>
         <h2 class="mb-3 font-medium text-highlighted">Datasets</h2>
         <div class="overflow-hidden rounded-lg border border-default">
-          <NuxtLink v-for="dataset in datasets" :key="dataset.id" :to="`/${dataset.namespace_path}/${dataset.slug}`" class="flex items-center justify-between gap-4 border-b border-default p-4 last:border-b-0 hover:bg-elevated"><div><p class="font-medium text-highlighted">{{ dataset.name }}</p><p class="mt-1 font-mono text-sm text-muted">{{ dataset.slug }}</p><p v-if="dataset.description" class="mt-2 text-sm text-muted">{{ dataset.description }}</p></div><UBadge color="neutral" variant="subtle">{{ dataset.role || 'system' }}</UBadge></NuxtLink>
+          <NuxtLink v-for="dataset in datasets" :key="dataset.id" :to="`/${dataset.namespace_path}/${dataset.slug}`" class="flex items-center justify-between gap-4 border-b border-default p-4 last:border-b-0 hover:bg-elevated"><div><p class="font-medium text-highlighted">{{ dataset.name }}</p><p class="mt-1 font-mono text-sm text-muted">{{ dataset.slug }}</p><DatasetDescriptionSummary :description="dataset.description" /></div><UBadge color="neutral" variant="subtle">{{ dataset.role || 'system' }}</UBadge></NuxtLink>
           <p v-if="!datasets.length" class="p-8 text-center text-muted">This {{ group.kind === 'group' ? 'group' : 'account' }} has no visible datasets.</p>
         </div>
       </div>

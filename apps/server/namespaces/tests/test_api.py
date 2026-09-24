@@ -92,6 +92,24 @@ class NamespaceApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item['path'] for item in response.json()['items']], ['lab', 'researcher'])
 
+    def test_subgroup_access_exposes_only_its_ancestor_navigation_shell(self):
+        """Allow navigation through parents without leaking sibling contents."""
+
+        laboratory = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Laboratory', slug='lab')
+        imaging = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Imaging', slug='imaging', parent=laboratory)
+        sibling = Namespace.objects.create(kind=Namespace.Kind.GROUP, name='Genomics', slug='genomics', parent=laboratory)
+        NamespaceMembership.objects.create(namespace=imaging, user=self.user, role=NamespaceMembership.Role.READER)
+
+        response = self.client.get('/api/v1/namespaces')
+        parent_response = self.client.get(f'/api/v1/namespaces/{laboratory.id}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['path'] for item in response.json()['items']], ['lab', 'lab/imaging', 'researcher'])
+        self.assertNotIn(str(sibling.id), [item['id'] for item in response.json()['items']])
+        self.assertEqual(parent_response.status_code, 200)
+        self.assertIsNone(parent_response.json()['role'])
+        self.assertFalse(parent_response.json()['can_create_dataset'])
+
     def test_group_owner_can_rename_and_delete_empty_group(self):
         """Expose mutable group paths and irreversible empty-group deletion."""
 

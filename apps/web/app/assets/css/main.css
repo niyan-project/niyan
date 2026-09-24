@@ -32,7 +32,7 @@ body {
 
 [data-niyan-readme] h2 { font-size: 1.25rem; }
 [data-niyan-readme] h3 { font-size: 1.05rem; }
-[data-niyan-readme] :where(p, ul, ol, pre, blockquote) { margin: 0.8em 0; }
+[data-niyan-readme] :where(p, ul, ol, pre, blockquote, table) { margin: 0.8em 0; }
 [data-niyan-readme] :where(ul, ol) { padding-left: 1.5rem; }
 [data-niyan-readme] ul { list-style: disc; }
 [data-niyan-readme] ol { list-style: decimal; }
@@ -41,3 +41,10 @@ body {
 [data-niyan-readme] pre { overflow-x: auto; border-radius: 0.5rem; background: var(--ui-bg-muted); padding: 1rem; }
 [data-niyan-readme] pre code { background: transparent; padding: 0; }
 [data-niyan-readme] a { color: var(--ui-primary); text-decoration: underline; text-underline-offset: 2px; }
+[data-niyan-readme] blockquote { border-left: 0.25rem solid var(--ui-border); padding-left: 1rem; color: var(--ui-text-muted); }
+[data-niyan-readme] table { width: 100%; border-collapse: collapse; }
+[data-niyan-readme] :where(th, td) { border: 1px solid var(--ui-border); padding: 0.5rem 0.75rem; text-align: left; }
+[data-niyan-readme] th { background: var(--ui-bg-muted); font-weight: 500; }
+[data-niyan-readme] img { max-width: 100%; height: auto; }
+[data-niyan-readme] .task-list-item { list-style: none; }
+[data-niyan-readme] .task-list-item input { margin-right: 0.5rem; }

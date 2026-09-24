@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.test import SimpleTestCase, TestCase
 
 from accounts.models import User
@@ -35,6 +36,17 @@ class UserModelTests(TestCase):
 
         with self.assertRaises(ValidationError):
             User.objects.create_user(username='researcher@example.com')
+
+    def test_nonblank_emails_are_normalized_and_case_insensitively_unique(self):
+        """Allow missing emails while preventing ambiguous commit identities."""
+
+        first = User.objects.create_user(username='first', email=' Ada@Example.TEST ')
+        User.objects.create_user(username='without-email')
+        User.objects.create_user(username='also-without-email')
+
+        self.assertEqual(first.email, 'ada@example.test')
+        with self.assertRaises(IntegrityError):
+            User.objects.create_user(username='duplicate', email='ADA@example.test')
 
 
 class UserAdminTests(SimpleTestCase):

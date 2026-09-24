@@ -26,9 +26,9 @@ async function changeEmail() {
     <UCard>
       <template #header><div><h2 class="font-medium text-highlighted">Change email</h2><p class="mt-1 text-sm text-muted">Your administrator can use this address for account-related communication.</p></div></template>
       <form class="space-y-4" @submit.prevent="changeEmail">
-        <UFormField label="Email address" required><UInput v-model="form.email" type="email" autocomplete="email" class="w-full" /></UFormField>
+        <UFormField label="Email address" hint="Optional"><UInput v-model="form.email" type="email" autocomplete="email" class="w-full" /></UFormField>
         <UFormField label="Current password" required><UInput v-model="form.current_password" type="password" autocomplete="current-password" class="w-full" /></UFormField>
-        <div class="flex justify-end"><UButton type="submit" label="Change email" :loading="saving" :disabled="!form.email || !form.current_password" /></div>
+        <div class="flex justify-end"><UButton type="submit" label="Change email" :loading="saving" :disabled="!form.current_password" /></div>
       </form>
     </UCard>
   </SettingsShell>

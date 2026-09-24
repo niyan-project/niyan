@@ -1,5 +1,5 @@
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DatasetView from '~/components/DatasetView.vue'
 import { NiyanApiError } from '~/composables/useApi'
@@ -68,23 +68,33 @@ describe('dataset repository view', () => {
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining(`revision=${'a'.repeat(40)}`))
   })
 
-  it('requires the exact dataset path before permanent deletion is enabled', async () => {
+  it('confirms permanent deletion in a modal and shows indeterminate progress', async () => {
     currentRoute.query = { tab: 'settings' }
     currentRoute.fullPath = '/lab/images?tab=settings'
     const wrapper = await mountSuspended(DatasetView, { props: { dataset } })
     await flushPromises()
 
-    const deleteButton = wrapper.findAll('button').find(button => button.text().includes('Delete dataset'))!
+    const openButton = wrapper.findAll('button').find(button => button.text() === 'Delete dataset')!
+    expect(wrapper.text()).not.toContain('Type lab/images to confirm')
+    await openButton.trigger('click')
+    await flushPromises()
+    const dialog = document.body.querySelector('[role="dialog"]')!
+    const deleteButton = new DOMWrapper(Array.from(dialog.querySelectorAll('button')).find(button => button.textContent?.includes('Delete dataset permanently'))!)
     expect(deleteButton.attributes()).toHaveProperty('disabled')
-    const confirmation = wrapper.findAll('input').at(-1)!
+    const confirmation = new DOMWrapper(dialog.querySelector('input')!)
     await confirmation.setValue('lab/image')
     expect(deleteButton.attributes()).toHaveProperty('disabled')
     await confirmation.setValue('lab/images')
     expect(deleteButton.attributes()).not.toHaveProperty('disabled')
+    let finishDeletion: (() => void) | undefined
+    api.delete.mockImplementation(() => new Promise<void>(resolve => { finishDeletion = resolve }))
     await deleteButton.trigger('click')
     await flushPromises()
 
     expect(api.delete).toHaveBeenCalledWith('/api/v1/datasets/dataset-id')
+    expect(dialog.textContent).toContain('Deleting the repository and its stored files')
+    finishDeletion!()
+    await flushPromises()
   })
 
   it('uses semantic buttons for every repository entry so keyboard activation is native', async () => {
@@ -162,5 +172,24 @@ describe('dataset repository view', () => {
     await principalTypeSelect.vm.$emit('update:modelValue', 'group')
     await flushPromises()
     expect(wrapper.findAllComponents({ name: 'USelect' }).some(select => JSON.stringify(select.props('items')) === JSON.stringify([{ label: 'research/vision', value: 'research/vision' }]))).toBe(true)
+  })
+
+  it('keeps commit subjects plain while rendering bodies and linked authors', async () => {
+    currentRoute.query = { tab: 'history' }
+    currentRoute.fullPath = '/lab/images?tab=history'
+    api.get.mockImplementation((url: string) => {
+      if (url.includes('refs?kind=branches')) return Promise.resolve({ items: [{ name: 'main' }] })
+      if (url.includes('refs?kind=tags')) return Promise.resolve({ items: [] })
+      if (url.includes('/repository/commits?')) return Promise.resolve({ items: [{ object_id: 'a'.repeat(40), parent_ids: [], author_name: 'Ada', author_email: 'ada@example.test', authored_at: '2030-01-01T00:00:00Z', subject: '**Plain subject**', body: '**Detailed** notes.', author_user: { id: 7, username: 'ada', display_name: 'Ada Lovelace' } }] })
+      throw new Error(`Unexpected GET ${url}`)
+    })
+
+    const wrapper = await mountSuspended(DatasetView, { props: { dataset } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('**Plain subject**')
+    expect(wrapper.get('strong').text()).toBe('Detailed')
+    expect(wrapper.get('a[href="/users/ada"]').text()).toBe('Ada Lovelace')
+    expect(wrapper.text()).not.toContain('Unlinked author')
   })
 })

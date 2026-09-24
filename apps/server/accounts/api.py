@@ -145,6 +145,17 @@ class UserSearchResponse(Schema):
     items: list[UserSearchItemResponse]
 
 
+class UserProfileResponse(Schema):
+    """Expose the small authenticated profile surface for a registered user."""
+
+    id: int
+    username: str
+    display_name: str
+    first_name: str
+    last_name: str
+    email: str
+
+
 class DeviceAuthorizationStartInput(Schema):
     """Describe a browser-assisted CLI login request."""
 
@@ -328,6 +339,23 @@ def search_users_endpoint(request, query: str = Query(..., min_length=2, max_len
     return {'items': [{'id': user.id, 'username': user.username, 'display_name': user.get_full_name().strip() or user.username} for user in users]}
 
 
+@router.get('/users/{username}', auth=django_auth, response={200: UserProfileResponse, 401: ErrorResponse, 404: ErrorResponse})
+def get_user_profile_endpoint(request, username: str):
+    """Return one registered user's profile to another authenticated user."""
+
+    user = get_user_model().objects.filter(username=username).first()
+    if user is None:
+        return Status(404, {'code': 'user_not_found', 'detail': 'The requested user does not exist.'})
+    return {
+        'id': user.id,
+        'username': user.username,
+        'display_name': user.get_full_name().strip() or user.username,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'email': user.email,
+    }
+
+
 @router.get('/tokens', auth=django_auth, response={200: AccessTokenListResponse, 401: ErrorResponse})
 def list_access_tokens_endpoint(request):
     """List every access token issued to the browser user."""
@@ -393,13 +421,15 @@ def change_email_endpoint(request, payload: EmailChangeInput):
     if not request.auth.check_password(payload.current_password):
         return Status(400, {'code': 'invalid_current_password', 'detail': 'The current password is incorrect.'})
 
-    email = get_user_model().objects.normalize_email(payload.email.strip())
+    email = get_user_model().objects.normalize_email(payload.email.strip()).lower()
     try:
-        validate_email(email)
+        if email:
+            validate_email(email)
+        request.auth.email = email
+        request.auth.full_clean(exclude=['password'])
     except ValidationError:
-        return Status(422, {'code': 'validation_error', 'detail': 'Enter a valid email address.'})
+        return Status(422, {'code': 'validation_error', 'detail': 'Enter a valid email address that is not already in use.'})
 
-    request.auth.email = email
     request.auth.save(update_fields=['email'])
     return serialize_current_user(request.auth)
 

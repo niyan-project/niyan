@@ -18,7 +18,9 @@ const selectedBlob = ref<BlobMetadata | null>(null)
 const saving = ref(false)
 const editForm = reactive({ name: props.dataset.name, slug: props.dataset.slug, description: props.dataset.description })
 const emptyGuide = ref<'new' | 'existing'>('new')
+const deleteOpen = ref(false)
 const deleteConfirmation = ref('')
+const deleting = ref(false)
 const userQuery = ref('')
 const userResults = ref<UserSearchItem[]>([])
 const grantForm = reactive<{ principal_type: 'user' | 'group', role: Role }>({ principal_type: 'user', role: 'reader' })
@@ -198,10 +200,9 @@ async function updateDataset() {
 }
 
 async function deleteDataset() {
-  const path = `${props.dataset.namespace_path}/${props.dataset.slug}`
-  if (deleteConfirmation.value !== path) return
-  saving.value = true
-  try { await api.delete(`/api/v1/datasets/${props.dataset.id}`); toast.add({ title: 'Dataset deleted', color: 'success' }); await navigateTo('/') } catch (error) { toast.add({ title: 'Could not delete dataset', description: error instanceof Error ? error.message : undefined, color: 'error' }) } finally { saving.value = false }
+  if (deleteConfirmation.value !== datasetPath.value) return
+  deleting.value = true
+  try { await api.delete(`/api/v1/datasets/${props.dataset.id}`); toast.add({ title: 'Dataset deleted', color: 'success' }); await navigateTo('/') } catch (error) { toast.add({ title: 'Could not delete dataset', description: error instanceof Error ? error.message : undefined, color: 'error' }); deleting.value = false }
 }
 
 async function ensureDraft() {
@@ -392,13 +393,13 @@ async function publishDraft() {
 
       <UCard v-if="readme" class="mt-6">
         <template #header><div class="flex items-center gap-2"><UIcon name="i-lucide-book-open" class="size-4" /><span class="font-medium">{{ readme.path }}</span></div></template>
-        <SafeMarkdown :content="readme.content" />
+        <SafeMarkdown :content="readme.content" :dataset-id="dataset.id" :dataset-path="datasetPath" :revision="revision" :source-path="readme.path" />
       </UCard>
     </section>
 
     <section v-else-if="tab === 'history'" class="mt-6 space-y-3">
       <div class="mb-4"><USelect :model-value="revision" :items="[...branches, ...tags]" icon="i-lucide-git-branch" class="min-w-40" :disabled="emptyRepository" @update:model-value="value => changeRevision(String(value))" /></div>
-      <div v-for="commit in commits" :key="commit.object_id" class="rounded-lg border border-default p-4"><div class="flex flex-col gap-2 sm:flex-row sm:justify-between"><div><p class="font-medium text-highlighted">{{ commit.subject }}</p><p class="mt-1 text-sm text-muted">{{ commit.author_name }} · {{ formatRelative(commit.authored_at) }}</p></div><code class="text-xs text-muted">{{ commit.object_id.slice(0, 10) }}</code></div></div>
+      <div v-for="commit in commits" :key="commit.object_id" class="rounded-lg border border-default p-4"><div class="flex flex-col gap-2 sm:flex-row sm:justify-between"><div class="min-w-0"><p class="font-medium text-highlighted">{{ commit.subject }}</p><p class="mt-1 text-sm text-muted"><NuxtLink v-if="commit.author_user" :to="`/users/${commit.author_user.username}`" class="hover:text-primary hover:underline">{{ commit.author_user.display_name }}</NuxtLink><span v-else>{{ commit.author_name }} <UBadge class="ml-1" color="neutral" variant="subtle" size="xs">Unlinked author</UBadge></span> · {{ formatRelative(commit.authored_at) }}</p><SafeMarkdown v-if="commit.body.trim()" class="mt-3 text-sm" :content="commit.body" :dataset-id="dataset.id" :dataset-path="datasetPath" :revision="revision" source-path="" /></div><code class="shrink-0 text-xs text-muted">{{ commit.object_id.slice(0, 10) }}</code></div></div>
       <UAlert v-if="!commits.length" color="neutral" variant="soft" description="No commits are available on this revision." />
     </section>
 
@@ -429,12 +430,16 @@ async function publishDraft() {
 
     <section v-else-if="tab === 'settings' && (canEdit || canDelete)" class="mt-6 space-y-6">
       <UCard v-if="canEdit"><template #header><h2 class="font-medium">Dataset details</h2></template><form class="grid gap-4 sm:grid-cols-2" @submit.prevent="updateDataset"><UFormField label="Name"><UInput v-model="editForm.name" class="w-full" /></UFormField><UFormField label="Slug"><UInput v-model="editForm.slug" class="w-full" /></UFormField><UFormField label="Description" hint="Optional" class="sm:col-span-2"><UTextarea v-model="editForm.description" :maxlength="500" autoresize class="w-full" /></UFormField><div class="flex justify-end sm:col-span-2"><UButton type="submit" label="Save changes" :loading="saving" /></div></form></UCard>
-      <UCard v-if="canDelete" class="ring-error/30"><template #header><h2 class="font-medium text-error">Delete dataset</h2></template><p class="mb-4 text-sm text-muted">Type <strong class="font-mono text-highlighted">{{ dataset.namespace_path }}/{{ dataset.slug }}</strong> to permanently delete the repository and its files.</p><div class="flex flex-col gap-3 sm:flex-row"><UInput v-model="deleteConfirmation" class="flex-1" /><UButton label="Delete dataset" color="error" :disabled="deleteConfirmation !== `${dataset.namespace_path}/${dataset.slug}`" :loading="saving" @click="deleteDataset" /></div></UCard>
+      <UCard v-if="canDelete" class="ring-error/30"><template #header><h2 class="font-medium text-error">Delete dataset</h2></template><p class="mb-4 text-sm text-muted">Permanently remove this dataset's Git repository and stored files.</p><UButton label="Delete dataset" color="error" @click="deleteOpen = true" /></UCard>
     </section>
 
     <UModal v-model:open="uploadOpen" title="Stage files for a browser commit" description="Files are staged in a private draft until you explicitly commit them.">
       <template #body><div class="space-y-4"><UFileUpload v-model="selectedFiles" multiple class="w-full" label="Choose dataset files" description="Binary files and files above 10 MiB use Git LFS automatically." /><UFormField label="Storage"><USelect v-model="storageChoice" :items="[{ label: 'Automatic (recommended)', value: 'auto' }, { label: 'Ordinary Git', value: 'git' }, { label: 'Git LFS', value: 'lfs' }]" class="w-full" /></UFormField><UAlert v-if="transferLabel" color="neutral" variant="soft" :description="transferLabel" /></div></template>
       <template #footer><div class="flex w-full justify-end gap-2"><UButton label="Cancel" color="neutral" variant="outline" :disabled="transferring" @click="uploadOpen = false" /><UButton label="Stage files" icon="i-lucide-upload" :disabled="!selectedFiles.length" :loading="transferring" @click="stageSelectedFiles" /></div></template>
+    </UModal>
+    <UModal v-model:open="deleteOpen" :dismissible="!deleting" title="Permanently delete dataset" description="This action cannot be undone." @update:open="value => { if (!value && !deleting) deleteConfirmation = '' }">
+      <template #body><div class="space-y-4"><UAlert color="error" variant="soft" icon="i-lucide-triangle-alert" title="Repository and file deletion" description="Every Git commit, branch, tag, and stored dataset file will be permanently removed." /><UFormField :label="`Type ${datasetPath} to confirm`"><UInput v-model="deleteConfirmation" class="w-full" :disabled="deleting" /></UFormField><div v-if="deleting" class="space-y-2" aria-live="polite"><UProgress animation="carousel" /><p class="text-sm text-muted">Deleting the repository and its stored files. This may take some time.</p></div></div></template>
+      <template #footer><div class="flex w-full justify-end gap-2"><UButton label="Cancel" color="neutral" variant="outline" :disabled="deleting" @click="deleteOpen = false" /><UButton label="Delete dataset permanently" color="error" :disabled="deleteConfirmation !== datasetPath || deleting" :loading="deleting" @click="deleteDataset" /></div></template>
     </UModal>
   </UContainer>
 </template>

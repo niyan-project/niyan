@@ -24,7 +24,7 @@ const showGroups = computed(() => route.query.view === 'groups')
 const creatableNamespaces = computed(() => namespaces.value.filter(namespace => namespace.can_create_dataset).map(namespace => ({ label: namespace.kind === 'personal' ? `${namespace.name} (personal)` : namespace.path, value: namespace.id })))
 const datasetForm = reactive({ namespace_id: creatableNamespaces.value[0]?.value || '', name: '', slug: '', description: '' })
 const filteredDatasets = computed(() => datasets.value.filter(dataset => `${dataset.namespace_path}/${dataset.slug} ${dataset.name}`.toLowerCase().includes(query.value.toLowerCase())))
-const groups = computed(() => namespaces.value.filter(namespace => namespace.kind === 'group' && namespace.path.toLowerCase().includes(query.value.toLowerCase())))
+const groups = computed(() => namespaces.value.filter(namespace => namespace.kind === 'group' && namespace.parent_id === null && namespace.path.toLowerCase().includes(query.value.toLowerCase())))
 const errorMessage = computed(() => dashboardError.value instanceof NiyanApiError ? dashboardError.value.message : dashboardError.value ? 'The dashboard could not be loaded.' : '')
 const { formatRelative } = useFormatting()
 
@@ -106,7 +106,7 @@ async function createDataset() {
     </div>
     <div v-else class="mt-6 overflow-hidden rounded-lg border border-default bg-default">
       <NuxtLink v-for="dataset in filteredDatasets" :key="dataset.id" :to="`/${dataset.namespace_path}/${dataset.slug}`" class="flex flex-col gap-2 border-b border-default p-4 last:border-b-0 hover:bg-elevated sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 class="font-medium text-highlighted">{{ dataset.name }}</h2><p class="mt-1 font-mono text-sm text-muted">{{ dataset.namespace_path }}/{{ dataset.slug }}</p><p v-if="dataset.description" class="mt-2 text-sm text-muted">{{ dataset.description }}</p></div>
+        <div><h2 class="font-medium text-highlighted">{{ dataset.name }}</h2><p class="mt-1 font-mono text-sm text-muted">{{ dataset.namespace_path }}/{{ dataset.slug }}</p><DatasetDescriptionSummary :description="dataset.description" /></div>
         <div class="flex items-center gap-3 text-sm text-muted"><UBadge color="neutral" variant="subtle">{{ dataset.role || 'system' }}</UBadge><span>{{ formatRelative(dataset.created_at) }}</span></div>
       </NuxtLink>
       <div v-if="!filteredDatasets.length" class="p-8 text-center text-muted">No datasets match this view.</div>

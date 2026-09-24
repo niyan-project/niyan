@@ -1,4 +1,4 @@
-from datasets.policies import can_delete_group, can_manage_group, can_view_namespace
+from datasets.policies import can_delete_group, can_manage_group, can_view_namespace, can_view_namespace_directly
 from namespaces.models import Namespace
 
 
@@ -61,5 +61,14 @@ def get_deletable_group(*, namespace_id, user):
 def list_visible_namespaces(*, user):
     """Return visible personal and group namespaces in deterministic path order."""
 
-    namespaces = Namespace.objects.select_related('parent', 'owner_user').order_by('slug', 'id')
-    return sorted((namespace for namespace in namespaces if can_view_namespace(user=user, namespace=namespace)), key=lambda namespace: (namespace.path, str(namespace.id)))
+    namespaces = list(Namespace.objects.select_related('parent', 'owner_user').order_by('slug', 'id'))
+    by_id = {namespace.id: namespace for namespace in namespaces}
+    visible_ids = set()
+    for namespace in namespaces:
+        if not can_view_namespace_directly(user=user, namespace=namespace):
+            continue
+        current = namespace
+        while current is not None:
+            visible_ids.add(current.id)
+            current = by_id.get(current.parent_id)
+    return sorted((namespace for namespace in namespaces if namespace.id in visible_ids), key=lambda namespace: (namespace.path, str(namespace.id)))

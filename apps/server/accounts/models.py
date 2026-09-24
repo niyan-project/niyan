@@ -5,6 +5,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from accounts.validators import normalize_path_slug, path_slug_validator
@@ -20,12 +21,23 @@ class User(AbstractUser):
         error_messages={'unique': 'A user with that username already exists.'},
         help_text='Used for login and the initial personal namespace path.',
     )
+    email = models.EmailField(blank=True, max_length=254)
+
+    class Meta:
+        """Keep optional account emails unique without treating blanks as identities."""
+
+        verbose_name = 'user'
+        verbose_name_plural = 'users'
+        constraints = [
+            models.UniqueConstraint(Lower('email'), condition=~Q(email=''), name='unique_nonblank_user_email_ci'),
+        ]
 
     def clean(self):
         """Normalize the username before uniqueness validation."""
 
         super().clean()
         self.username = normalize_path_slug(self.username)
+        self.email = self.__class__.objects.normalize_email(self.email.strip()).lower()
 
     def save(self, *args, **kwargs):
         """Persist the user with a normalized path-safe username.
@@ -39,6 +51,7 @@ class User(AbstractUser):
         """
 
         self.username = normalize_path_slug(self.username)
+        self.email = self.__class__.objects.normalize_email(self.email.strip()).lower()
         path_slug_validator(self.username)
         return super().save(*args, **kwargs)
 

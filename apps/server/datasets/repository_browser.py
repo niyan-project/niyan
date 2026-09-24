@@ -148,18 +148,20 @@ class RepositoryBrowser:
                 'log',
                 f'--skip={offset}',
                 f'--max-count={limit + 1}',
-                '-z',
-                '--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%s',
+                '--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%s%x00%b%x1e',
                 resolved_commit,
             ]
         )
         records = []
-        encoded_fields = result.stdout.rstrip(b'\x00').split(b'\x00') if result.stdout else []
-        if len(encoded_fields) % 6:
-            raise RepositoryBrowseError('Git returned malformed commit metadata.')
-        for field_offset in range(0, len(encoded_fields), 6):
-            fields = [field.decode('utf-8', errors='replace') for field in encoded_fields[field_offset : field_offset + 6]]
-            object_id, parents, author_name, author_email, authored_at, subject = fields
+        encoded_records = result.stdout.split(b'\x1e\n') if result.stdout else []
+        if encoded_records and encoded_records[-1] == b'':
+            encoded_records.pop()
+        for encoded_record in encoded_records:
+            encoded_fields = encoded_record.split(b'\x00')
+            if len(encoded_fields) != 7:
+                raise RepositoryBrowseError('Git returned malformed commit metadata.')
+            fields = [field.decode('utf-8', errors='replace') for field in encoded_fields]
+            object_id, parents, author_name, author_email, authored_at, subject, body = fields
             records.append(
                 {
                     'object_id': object_id,
@@ -168,6 +170,7 @@ class RepositoryBrowser:
                     'author_email': author_email,
                     'authored_at': authored_at,
                     'subject': subject,
+                    'body': body,
                 }
             )
         has_more = len(records) > limit

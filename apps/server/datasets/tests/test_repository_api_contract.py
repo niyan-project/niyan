@@ -6,7 +6,7 @@ from django.test import SimpleTestCase
 
 from datasets.lfs_transfers import LfsTransferUnavailable
 from datasets.object_storage import ObjectStoreError
-from datasets.repository_api import _parse_byte_range, authorize_repository_download_endpoint, download_repository_blob_endpoint, get_repository_blob_endpoint, get_repository_readme_endpoint, list_repository_commits_endpoint, list_repository_refs_endpoint, list_repository_tree_endpoint, resolve_repository_revision_endpoint, serialize_blob
+from datasets.repository_api import _parse_byte_range, authorize_repository_download_endpoint, display_repository_content_endpoint, download_repository_blob_endpoint, get_repository_blob_endpoint, get_repository_readme_endpoint, list_repository_commits_endpoint, list_repository_refs_endpoint, list_repository_tree_endpoint, resolve_repository_revision_endpoint, serialize_blob
 from datasets.repository_browser import InvalidRepositoryInput, LfsContentUnavailable, RepositoryBrowseError, RepositoryPathNotFound, RevisionNotFound
 
 
@@ -102,6 +102,19 @@ class RepositoryApiContractTests(SimpleTestCase):
         self.assertEqual(resolution['dataset_id'], self.dataset_id)
         self.assertEqual(tree['path'], 'data')
         self.assertEqual(blob, serialize_blob(FakeBrowser.commit, browser.metadata))
+
+    def test_readme_lfs_resource_redirects_to_direct_object_storage(self):
+        """Keep relative README images out of Django's bulk-byte path."""
+
+        browser = FakeBrowser(lfs=True)
+        lfs_object = SimpleNamespace()
+        objects = Mock()
+        objects.select_related.return_value.filter.return_value.first.return_value = lfs_object
+        with patch('datasets.repository_api.get_browser', return_value=browser), patch('datasets.repository_api.LfsObject.objects', objects), patch('datasets.repository_api.issue_download_action', return_value=SimpleNamespace(url='https://objects.example.test/signed')):
+            response = display_repository_content_endpoint(FakeRequest(), self.dataset_id, path='images/scan.png', revision='main')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], 'https://objects.example.test/signed')
 
     def test_list_endpoints_hide_missing_datasets_and_map_domain_errors(self):
         """Translate repository failures to stable non-sensitive responses."""

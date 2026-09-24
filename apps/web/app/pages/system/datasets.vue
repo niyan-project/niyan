@@ -19,7 +19,7 @@ const { formatRelative } = useFormatting()
     <UAlert v-if="errorMessage" class="mt-6" color="error" variant="soft" icon="i-lucide-circle-alert" :description="errorMessage" />
     <div class="mt-6 overflow-hidden rounded-lg border border-default bg-default">
       <NuxtLink v-for="dataset in datasets" :key="dataset.id" :to="`/${dataset.namespace_path}/${dataset.slug}`" class="flex flex-col gap-2 border-b border-default p-4 last:border-b-0 hover:bg-elevated sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 class="font-medium text-highlighted">{{ dataset.name }}</h2><p class="mt-1 font-mono text-sm text-muted">{{ dataset.namespace_path }}/{{ dataset.slug }}</p><p v-if="dataset.description" class="mt-2 text-sm text-muted">{{ dataset.description }}</p></div>
+        <div><h2 class="font-medium text-highlighted">{{ dataset.name }}</h2><p class="mt-1 font-mono text-sm text-muted">{{ dataset.namespace_path }}/{{ dataset.slug }}</p><DatasetDescriptionSummary :description="dataset.description" /></div>
         <div class="text-sm text-muted">Created {{ formatRelative(dataset.created_at) }}</div>
       </NuxtLink>
       <div v-if="!datasets.length && !errorMessage" class="p-8 text-center text-muted">No datasets found.</div>

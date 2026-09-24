@@ -33,7 +33,7 @@ def create_user(*, username, password, email='', first_name='', last_name='', cr
     user_model = get_user_model()
     user = user_model(
         username=username,
-        email=user_model.objects.normalize_email(email.strip()),
+        email=user_model.objects.normalize_email(email.strip()).lower(),
         first_name=first_name.strip(),
         last_name=last_name.strip(),
         is_active=True,

@@ -1,9 +1,11 @@
 from datetime import datetime
+from mimetypes import guess_type
 from typing import Literal
 from urllib.parse import urlencode
 from uuid import UUID
 
-from django.http import HttpResponse, StreamingHttpResponse
+from django.contrib.auth import get_user_model
+from django.http import HttpResponse, HttpResponseRedirect, StreamingHttpResponse
 from django.utils.http import content_disposition_header
 from ninja import Query, Router, Schema, Status
 
@@ -41,6 +43,14 @@ class RefListResponse(Schema):
     items: list[RefResponse]
 
 
+class CommitAuthorUserResponse(Schema):
+    """Identify a registered account matching a commit email."""
+
+    id: int
+    username: str
+    display_name: str
+
+
 class CommitResponse(Schema):
     """Describe one immutable Git commit."""
 
@@ -50,6 +60,8 @@ class CommitResponse(Schema):
     author_email: str
     authored_at: datetime
     subject: str
+    body: str
+    author_user: CommitAuthorUserResponse | None
 
 
 class CommitListResponse(Schema):
@@ -183,6 +195,11 @@ def list_repository_commits_endpoint(request, dataset_id: UUID, revision: str = 
         if browser is None:
             return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
         resolved_commit, items, next_offset = browser.list_commits(revision=revision, limit=limit, offset=offset)
+        normalized_emails = {item.get('author_email', '').strip().lower() for item in items if item.get('author_email', '').strip()}
+        users_by_email = {user.email: user for user in get_user_model().objects.filter(email__in=normalized_emails)}
+        for item in items:
+            user = users_by_email.get(item.get('author_email', '').strip().lower())
+            item['author_user'] = None if user is None else {'id': user.id, 'username': user.username, 'display_name': user.get_full_name().strip() or user.username}
         return {'resolved_commit': resolved_commit, 'limit': limit, 'offset': offset, 'next_offset': next_offset, 'items': items}
     except RevisionNotFound:
         return Status(404, {'code': 'revision_not_found', 'detail': 'The requested revision does not exist.'})
@@ -366,6 +383,38 @@ def authorize_repository_download_endpoint(request, dataset_id: UUID, path: str,
         return Status(422, {'code': 'validation_error', 'detail': 'The repository request is invalid.'})
     except (LfsTransferUnavailable, ObjectStoreError):
         return Status(503, {'code': 'download_unavailable', 'detail': 'The download is temporarily unavailable.'})
+    except RepositoryBrowseError:
+        return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be read.'})
+
+
+@router.get('/{dataset_id}/repository/content', response={200: None, 302: None, 401: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 422: ErrorResponse, 503: ErrorResponse})
+def display_repository_content_endpoint(request, dataset_id: UUID, path: str, revision: str = 'main'):
+    """Display an authorized README resource without proxying Git LFS bytes."""
+
+    try:
+        browser = get_browser(request, dataset_id)
+        if browser is None:
+            return Status(404, {'code': 'dataset_not_found', 'detail': 'The requested dataset does not exist.'})
+        resolved_commit, metadata = browser.get_blob_metadata(revision=revision, path=path)
+        if metadata.lfs_object_id is not None:
+            lfs_object = LfsObject.objects.select_related('dataset').filter(dataset_id=dataset_id, oid=metadata.lfs_object_id, size=metadata.lfs_size, state__in=[LfsObject.State.AVAILABLE, LfsObject.State.REFERENCED]).first()
+            if lfs_object is None:
+                return Status(409, {'code': 'lfs_content_unavailable', 'detail': 'Git LFS content is not available yet.'})
+            return HttpResponseRedirect(issue_download_action(lfs_object=lfs_object).url)
+        _, _, content = browser.open_blob_range(revision=resolved_commit, path=metadata.path, start=0, end=metadata.size)
+        response = StreamingHttpResponse(content, content_type=guess_type(metadata.path)[0] or 'application/octet-stream')
+        response['Content-Length'] = str(metadata.size)
+        response['Content-Disposition'] = content_disposition_header(False, metadata.path.rsplit('/', 1)[-1])
+        response['X-Niyan-Resolved-Commit'] = resolved_commit
+        return response
+    except RevisionNotFound:
+        return Status(404, {'code': 'revision_not_found', 'detail': 'The requested revision does not exist.'})
+    except RepositoryPathNotFound:
+        return Status(404, {'code': 'path_not_found', 'detail': 'The requested repository path does not exist.'})
+    except InvalidRepositoryInput:
+        return Status(422, {'code': 'validation_error', 'detail': 'The repository request is invalid.'})
+    except (LfsTransferUnavailable, ObjectStoreError):
+        return Status(503, {'code': 'download_unavailable', 'detail': 'The content is temporarily unavailable.'})
     except RepositoryBrowseError:
         return Status(503, {'code': 'repository_unavailable', 'detail': 'The dataset repository could not be read.'})
 

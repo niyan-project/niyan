@@ -330,6 +330,31 @@ class BrowserSessionApiTests(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.email, 'ada@example.test')
 
+    def test_email_change_rejects_another_users_address_case_insensitively(self):
+        """Keep commit-author identity unambiguous across accounts."""
+
+        User.objects.create_user(username='colleague', email='colleague@example.test')
+        self.client.force_login(self.user)
+        response = self.client.patch(
+            '/api/v1/auth/me/email',
+            {'current_password': 'correct horse battery staple', 'email': 'COLLEAGUE@example.test'},
+            content_type='application/json',
+            HTTP_X_CSRFTOKEN=self.csrf_token(),
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_authenticated_user_can_view_registered_profile(self):
+        """Expose names and email without making profiles public."""
+
+        self.client.force_login(self.user)
+        response = self.client.get('/api/v1/auth/users/researcher')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['email'], self.user.email)
+        self.client.logout()
+        self.assertEqual(self.client.get('/api/v1/auth/users/researcher').status_code, 401)
+
     def test_browser_user_can_change_personal_names(self):
         """Update low-risk profile fields and return refreshed display metadata."""
 

@@ -2,6 +2,7 @@ export type Role = 'reader' | 'contributor' | 'maintainer' | 'owner'
 
 export interface ApiErrorBody { code: string, detail: string }
 export interface CurrentUser { id: number, username: string, display_name: string, first_name?: string, last_name?: string, email: string, is_staff: boolean, is_superuser: boolean, system_permissions: SystemPermission[], authentication_method: 'session' | 'access_token', access_token: AccessTokenMetadata | null }
+export interface UserProfile { id: number, username: string, display_name: string, first_name: string, last_name: string, email: string }
 export type SystemPermission = 'users.view' | 'users.add' | 'users.change' | 'staff.view' | 'staff.change' | 'permission_groups.view' | 'permission_groups.add' | 'permission_groups.change' | 'permission_groups.delete' | 'groups.view' | 'groups.add' | 'groups.change' | 'groups.delete' | 'datasets.view' | 'datasets.add' | 'datasets.change' | 'datasets.delete'
 export interface SystemUser { id: number, username: string, display_name: string, email: string, first_name: string, last_name: string, is_active: boolean, is_staff: boolean, is_superuser: boolean, date_joined: string, last_login: string | null, permission_group_ids: number[] }
 export interface SystemUserList { count: number, limit: number, offset: number, items: SystemUser[] }
@@ -13,7 +14,8 @@ export interface Dataset { id: string, namespace_id: string, namespace_path: str
 export interface DatasetList { count: number, limit: number, offset: number, items: Dataset[] }
 export interface RefItem { name: string, full_name: string, object_id: string, object_type: string }
 export interface RefList { kind: 'branches' | 'tags', limit: number, offset: number, next_offset: number | null, items: RefItem[] }
-export interface CommitItem { object_id: string, parent_ids: string[], author_name: string, author_email: string, authored_at: string, subject: string }
+export interface CommitAuthorUser { id: number, username: string, display_name: string }
+export interface CommitItem { object_id: string, parent_ids: string[], author_name: string, author_email: string, authored_at: string, subject: string, body: string, author_user: CommitAuthorUser | null }
 export interface CommitList { resolved_commit: string, limit: number, offset: number, next_offset: number | null, items: CommitItem[] }
 export interface TreeEntry { name: string, path: string, mode: string, object_type: 'tree' | 'blob', object_id: string, size: number | null }
 export interface TreeList { resolved_commit: string, path: string, limit: number, offset: number, next_offset: number | null, items: TreeEntry[] }

@@ -32,7 +32,7 @@ class RepositoryFixtureMixin:
         self.repository_root = Path(self.repository_directory.name)
         self.settings_override = override_settings(REPOSITORIES_ROOT=self.repository_root)
         self.settings_override.enable()
-        self.user = User.objects.create_user(username='researcher')
+        self.user = User.objects.create_user(username='researcher', email='researcher@example.test', first_name='Ada', last_name='Researcher')
         self.dataset = create_dataset(namespace=self.user.personal_namespace, slug='images', name='Images', created_by=self.user)
 
         working_path = Path(self.working_directory.name)
@@ -51,7 +51,7 @@ class RepositoryFixtureMixin:
         (working_path / 'large.bin').write_text(f'version https://git-lfs.github.com/spec/v1\noid sha256:{lfs_object_id}\nsize 123456\n')
         (working_path / 'notes.txt').write_text('second version\n')
         self.run_git('-C', str(working_path), 'add', '.')
-        self.run_git('-C', str(working_path), 'commit', '-m', 'Add large data pointer')
+        self.run_git('-C', str(working_path), 'commit', '-m', 'Add large data pointer', '-m', '**Documents** the large-file example.')
         self.run_git('-C', str(working_path), 'remote', 'add', 'origin', str(self.repository_root / f'{self.dataset.id}.git'))
         self.run_git('-C', str(working_path), 'push', '--tags', 'origin', 'main')
         self.main_commit = self.run_git('-C', str(working_path), 'rev-parse', 'HEAD').stdout.strip()
@@ -120,6 +120,8 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertEqual(len(commits['items']), 2)
         self.assertEqual(commits['resolved_commit'], self.main_commit)
         self.assertEqual(commits['items'][0]['subject'], 'Add large data pointer')
+        self.assertEqual(commits['items'][0]['body'], '**Documents** the large-file example.\n')
+        self.assertEqual(commits['items'][0]['author_user']['username'], 'researcher')
         self.assertIn('README.md', [item['name'] for item in tree['items']])
         large_entry = next(item for item in tree['items'] if item['name'] == 'large.bin')
         self.assertTrue(large_entry['is_lfs'])
@@ -129,6 +131,12 @@ class RepositoryBrowsingApiTests(RepositoryFixtureMixin, TestCase):
         self.assertEqual(readme['resolved_commit'], self.main_commit)
         self.assertEqual(readme['path'], 'README.md')
         self.assertIn('Dataset documentation.', readme['content'])
+
+        content = self.client.get(self.repository_url('content'), {'revision': 'main', 'path': 'README.md'})
+        self.assertEqual(content.status_code, 200)
+        self.assertEqual(content['Content-Type'], 'text/markdown')
+        self.assertIn('inline', content['Content-Disposition'])
+        self.assertIn(b'Dataset documentation.', b''.join(content.streaming_content))
 
     def test_resolve_dataset_path_and_revision_for_one_pinned_operation(self):
         """Resolve a full locator to dataset, repository path, and exact commit."""

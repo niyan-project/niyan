@@ -117,6 +117,18 @@ def get_dataset_product_role(*, user, dataset):
 def can_view_namespace(*, user, namespace):
     """Return whether a namespace is visible to a user."""
 
+    if can_view_namespace_directly(user=user, namespace=namespace):
+        return True
+    descendants = Namespace.objects.select_related('parent', 'owner_user').filter(kind=Namespace.Kind.GROUP)
+    for descendant in descendants:
+        if _is_namespace_descendant(descendant=descendant, ancestor=namespace) and can_view_namespace_directly(user=user, namespace=descendant):
+            return True
+    return False
+
+
+def can_view_namespace_directly(*, user, namespace):
+    """Return whether authority inside this exact namespace makes it visible."""
+
     if any(
         has_staff_permission(user=user, permission=permission)
         for permission in ('namespaces.view_namespace', 'namespaces.add_namespace', 'namespaces.change_namespace', 'namespaces.delete_namespace', 'datasets.add_dataset')
@@ -125,6 +137,17 @@ def can_view_namespace(*, user, namespace):
     if get_namespace_role(user=user, namespace=namespace) is not None:
         return True
     return any(can_read_dataset(user=user, dataset=dataset) for dataset in namespace.datasets.select_related('namespace__parent').all())
+
+
+def _is_namespace_descendant(*, descendant, ancestor):
+    """Return whether a namespace is nested below another namespace."""
+
+    current = descendant.parent
+    while current is not None:
+        if current.pk == ancestor.pk:
+            return True
+        current = current.parent
+    return False
 
 
 def can_create_dataset(*, user, namespace):
